@@ -5,11 +5,9 @@ from database import users_collection
 from schema import *
 from passlib.context import CryptContext
 from fastapi.middleware.cors import CORSMiddleware
-
 origins = [
     "http://localhost:5173",  # React dev server
     "http://127.0.0.1:5173",
-    # you can add other domains if needed
 ]
 
 app = FastAPI(title="Auth API")

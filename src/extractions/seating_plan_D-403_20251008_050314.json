@@ -1,0 +1,210 @@
+{
+    "exam_date": "Sept 24, 2025",
+    "exam_time": "10:20 to 11:20 AM",
+    "course": "CS4049 - Blockchain and Cryptocurrency",
+    "section": "BCS-7B",
+    "room_no": "D-403",
+    "invigilator_name": "Signature Note",
+    "students": [
+        {
+            "serial_no": "1",
+            "roll_no": "22I-0839",
+            "name": "Muhammad Talha",
+            "seat_no": "C1R1"
+        },
+        {
+            "serial_no": "2",
+            "roll_no": "22I-0842",
+            "name": "Shah Abdullah",
+            "seat_no": "C1R2"
+        },
+        {
+            "serial_no": "3",
+            "roll_no": "22I-0857",
+            "name": "Inam Ullah",
+            "seat_no": "C1R3"
+        },
+        {
+            "serial_no": "4",
+            "roll_no": "22I-0865",
+            "name": "Hamza Imran",
+            "seat_no": "C1R4"
+        },
+        {
+            "serial_no": "5",
+            "roll_no": "22I-0869",
+            "name": "Emaan Fatima",
+            "seat_no": "C1R5"
+        },
+        {
+            "serial_no": "6",
+            "roll_no": "22I-0875",
+            "name": "Daud Cheema",
+            "seat_no": "C1R6"
+        },
+        {
+            "serial_no": "7",
+            "roll_no": "22I-0978",
+            "name": "Abdullah Mehmood",
+            "seat_no": "C2R1"
+        },
+        {
+            "serial_no": "8",
+            "roll_no": "22I-0983",
+            "name": "Muhammad Taha",
+            "seat_no": "C2R2"
+        },
+        {
+            "serial_no": "9",
+            "roll_no": "22I-0989",
+            "name": "Mattee Ul Haq Ghauri",
+            "seat_no": "C2R3"
+        },
+        {
+            "serial_no": "10",
+            "roll_no": "22I-1005",
+            "name": "Zarnab Javed",
+            "seat_no": "C2R4"
+        },
+        {
+            "serial_no": "11",
+            "roll_no": "22I-1008",
+            "name": "Afrah Syed",
+            "seat_no": "C2R5"
+        },
+        {
+            "serial_no": "12",
+            "roll_no": "22I-1021",
+            "name": "Abdul Munhim",
+            "seat_no": "C2R6"
+        },
+        {
+            "serial_no": "13",
+            "roll_no": "22I-1044",
+            "name": "Mohib Ullah",
+            "seat_no": "C3R1"
+        },
+        {
+            "serial_no": "14",
+            "roll_no": "22I-1054",
+            "name": "Ayna Sulaiman",
+            "seat_no": "C3R2"
+        },
+        {
+            "serial_no": "15",
+            "roll_no": "22I-1061",
+            "name": "Rahat Shafi",
+            "seat_no": "C3R3"
+        },
+        {
+            "serial_no": "16",
+            "roll_no": "22I-1065",
+            "name": "Samiya",
+            "seat_no": "C3R4"
+        },
+        {
+            "serial_no": "17",
+            "roll_no": "22I-1110",
+            "name": "Hassan Murtaza",
+            "seat_no": "C3R5"
+        },
+        {
+            "serial_no": "18",
+            "roll_no": "22I-1160",
+            "name": "Sana Fatima",
+            "seat_no": "C3R6"
+        },
+        {
+            "serial_no": "19",
+            "roll_no": "22I-1167",
+            "name": "Aneeq Ahmed",
+            "seat_no": "C4R1"
+        },
+        {
+            "serial_no": "20",
+            "roll_no": "22I-1170",
+            "name": "Arqam Zia",
+            "seat_no": "C4R2"
+        },
+        {
+            "serial_no": "21",
+            "roll_no": "22I-1182",
+            "name": "Muhammad Abdulrehman",
+            "seat_no": "C4R3"
+        },
+        {
+            "serial_no": "22",
+            "roll_no": "22I-1213",
+            "name": "Muhammad Sarmad",
+            "seat_no": "C4R4"
+        },
+        {
+            "serial_no": "23",
+            "roll_no": "22I-1267",
+            "name": "Ammar Ahmad",
+            "seat_no": "C4R5"
+        },
+        {
+            "serial_no": "24",
+            "roll_no": "22I-1283",
+            "name": "Ayesha Kiani",
+            "seat_no": "C4R6"
+        },
+        {
+            "serial_no": "25",
+            "roll_no": "22I-1298",
+            "name": "Salman Javed",
+            "seat_no": "C5R1"
+        },
+        {
+            "serial_no": "26",
+            "roll_no": "22I-1321",
+            "name": "Muneeb Ul Haq",
+            "seat_no": "C5R2"
+        },
+        {
+            "serial_no": "27",
+            "roll_no": "22I-1345",
+            "name": "Rihab Rabbani",
+            "seat_no": "C5R3"
+        },
+        {
+            "serial_no": "28",
+            "roll_no": "22I-2375",
+            "name": "Famia Malik",
+            "seat_no": "C5R4"
+        },
+        {
+            "serial_no": "29",
+            "roll_no": "22I-2390",
+            "name": "Awais Khan",
+            "seat_no": "C5R5"
+        },
+        {
+            "serial_no": "30",
+            "roll_no": "22I-2441",
+            "name": "Abdul Hannan",
+            "seat_no": "C5R6"
+        },
+        {
+            "serial_no": "31",
+            "roll_no": "22I-2640",
+            "name": "Abdul Moiz",
+            "seat_no": "C6R1"
+        },
+        {
+            "serial_no": "32",
+            "roll_no": "22I-2710",
+            "name": "Minahil Asif",
+            "seat_no": "C6R2"
+        },
+        {
+            "serial_no": "33",
+            "roll_no": "22P-0507",
+            "name": "Rayyan Azmat",
+            "seat_no": "C6R3"
+        }
+    ],
+    "total_students": 33,
+    "uploaded_at": "2025-10-08 05:03:14.844366"
+}
