@@ -1,8 +1,8 @@
 {
     "exam_date": "Sept 24, 2025",
-    "exam_time": "10:20 to 11:20 AM",
-    "course": "CS4049 - Blockchain and Cryptocurrency",
-    "section": "BCS-7B",
+    "exam_time": "10:20 to 11:20",
+    "course": null,
+    "section": null,
     "room_no": "D-403",
     "invigilator_name": "Signature Note",
     "students": [
@@ -206,5 +206,5 @@
         }
     ],
     "total_students": 33,
-    "uploaded_at": "2025-10-08 06:29:51.057365"
+    "uploaded_at": "2025-10-12 20:30:19.065533"
 }
