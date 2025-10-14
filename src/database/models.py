@@ -19,7 +19,7 @@ class Admin(Base):
     admin_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=False)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -30,7 +30,7 @@ class Invigilator(Base):
     email = Column(String, unique=True, nullable=False)
     photo_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
 
     activities = relationship("InvigilatorActivity", back_populates="invigilator")
 
@@ -42,7 +42,7 @@ class Investigator(Base):
     email = Column(String, unique=True, nullable=False)
     designation = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
 
 
 class Student(Base):

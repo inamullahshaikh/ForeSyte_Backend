@@ -8,8 +8,31 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
 import re
+import re
 from database.db import get_db
 from database.models import Admin, Invigilator, Investigator, Student
+from authlib.integrations.starlette_client import OAuth
+from fastapi import Request
+from starlette.responses import RedirectResponse
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+class RoleRegisterRequest(BaseModel):
+    email: str
+    name: str
+    role: str  # admin, invigilator, investigator
+load_dotenv()
+FRONTEND_URL = "http://localhost:5173"
+
+oauth = OAuth()
+google = oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
 from authlib.integrations.starlette_client import OAuth
 from fastapi import Request
 from starlette.responses import RedirectResponse
