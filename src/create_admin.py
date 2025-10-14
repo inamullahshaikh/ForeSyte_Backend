@@ -1,21 +1,37 @@
 import os
 import uuid
 from datetime import datetime
+from sqlalchemy import create_engine, text  # ✅ Added this
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
 
-from database.db import engine, SessionLocal
-from database.models import Admin  # adjust import path if different
-# create_tables.py
-from database.db import engine
-from database.models import *  # import all your models
-# Drop all existing tables
-Base.metadata.drop_all(bind=engine)
-print("All tables dropped successfully!")
+from database.db import engine, SessionLocal  # ✅ your db.py defines engine + SessionLocal
+from database.models import Admin, Base       # ✅ import Base for metadata ops
 
-# Create all tables
-Base.metadata.create_all(bind=engine)
-print("All tables created successfully!")
+# -------------------------
+# Database Configuration
+# -------------------------
+DB_NAME = os.getenv("POSTGRES_DB", "foresyte_db")
+DB_USER = os.getenv("POSTGRES_USER", "postgres")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "fe118emaan2004")  # ✅ your real password here
+DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
+DB_PORT = os.getenv("POSTGRES_PORT", "5432")
+
+def create_database_if_not_exists():
+    """Create the database if it doesn't already exist."""
+    default_engine = create_engine(
+        f"postgresql+psycopg2://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/postgres",
+        isolation_level='AUTOCOMMIT'
+    )
+
+    with default_engine.connect() as conn:
+        result = conn.execute(text(f"SELECT 1 FROM pg_database WHERE datname='{DB_NAME}'"))
+        exists = result.scalar()
+        if not exists:
+            conn.execute(text(f"CREATE DATABASE {DB_NAME}"))
+            print(f"✅ Database '{DB_NAME}' created successfully!")
+        else:
+            print(f"ℹ️ Database '{DB_NAME}' already exists.")
 
 # -------------------------
 # Password hashing setup
@@ -41,10 +57,9 @@ def create_super_admin():
     db: Session = SessionLocal()
 
     try:
-        # Check if super admin already exists
         existing = db.query(Admin).filter(Admin.email == SUPER_ADMIN["email"]).first()
         if existing:
-            print(f"Super admin with email {SUPER_ADMIN['email']} already exists!")
+            print(f"⚠️ Super admin with email {SUPER_ADMIN['email']} already exists!")
             return
 
         new_admin = Admin(
@@ -59,9 +74,9 @@ def create_super_admin():
         db.commit()
         db.refresh(new_admin)
 
-        print("Super admin created successfully!")
-        print(f"Email: {new_admin.email}")
-        print(f"Username: {new_admin.username}")
+        print("🎉 Super admin created successfully!")
+        print(f"   Email: {new_admin.email}")
+        print(f"   Username: {new_admin.username}")
 
     finally:
         db.close()
@@ -70,4 +85,15 @@ def create_super_admin():
 # Run Script
 # -------------------------
 if __name__ == "__main__":
+    # 1️⃣ Create the database if needed
+    create_database_if_not_exists()
+
+    # 2️⃣ Drop and recreate tables
+    Base.metadata.drop_all(bind=engine)
+    print("🗑️  All tables dropped successfully!")
+
+    Base.metadata.create_all(bind=engine)
+    print("✅ All tables created successfully!")
+
+    # 3️⃣ Create the default super admin
     create_super_admin()

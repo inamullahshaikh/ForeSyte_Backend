@@ -1,9 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
-# -------------------------
-# Import Routers
-# -------------------------
+from fastapi import FastAPI
+from starlette.middleware.sessions import SessionMiddleware
+import os
+from dotenv import load_dotenv
 from database.api.admins import router as admin_router
 from database.api.invigilators import router as invigilator_router
 from database.api.investigators import router as investigator_router
@@ -25,16 +25,26 @@ app = FastAPI(
     description="Exam monitoring and management system",
     version="1.0.0"
 )
+load_dotenv()
 
 # -------------------------
 # CORS Middleware
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # adjust for production
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "supersecret_session_key"),  # change to strong random key
 )
 
 # -------------------------

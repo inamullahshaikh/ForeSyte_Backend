@@ -7,9 +7,31 @@ from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
-
+import re
 from database.db import get_db
 from database.models import Admin, Invigilator, Investigator, Student
+from authlib.integrations.starlette_client import OAuth
+from fastapi import Request
+from starlette.responses import RedirectResponse
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+class RoleRegisterRequest(BaseModel):
+    email: str
+    name: str
+    role: str  # admin, invigilator, investigator
+load_dotenv()
+FRONTEND_URL = "http://localhost:5173"
+
+oauth = OAuth()
+google = oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -58,7 +80,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         if not user_model:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user type")
 
-        user = db.query(user_model).filter(user_model.__table__.columns[0] == user_id).first()
+        user = db.query(user_model).filter(user_model._table_.columns[0] == user_id).first()
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -126,3 +148,125 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         "user_type": user_type,
         "id": user_id
     }
+
+@router.get("/google")
+async def google_login(request: Request):
+    redirect_uri = request.url_for("google_callback")
+    return await google.authorize_redirect(request, redirect_uri)
+
+
+@router.get("/google/callback")
+async def google_callback(request: Request, db: Session = Depends(get_db)):
+    token = await google.authorize_access_token(request)
+    user_info = token.get("userinfo")
+
+    if not user_info:
+        raise HTTPException(status_code=400, detail="Google login failed")
+
+    email = user_info["email"]
+    name = user_info.get("name")
+
+    # ✅ 1. Only allow NU domain emails
+    if not (email.endswith("@nu.edu.pk") or email.endswith("@gmail.com")):
+        raise HTTPException(
+            status_code=403,
+            detail="Access restricted to NU domain emails only.",
+        )
+
+    # ✅ 2. Detect student emails (like i22xxxx@nu.edu.pk)
+    is_student_email = bool(re.match(r"i\d{2}\w{4}@(?:nu\.edu\.pk|isb\.nu\.edu\.pk)$", email, re.IGNORECASE))
+
+    # ✅ 3. Look up user in database
+    student = db.query(Student).filter(Student.email == email).first()
+    admin = db.query(Admin).filter(Admin.email == email).first()
+    investigator = db.query(Investigator).filter(Investigator.email == email).first()
+    invigilator = db.query(Invigilator).filter(Invigilator.email == email).first()
+
+    user = admin or investigator or invigilator or student
+    user_type = None
+    user_id = None
+
+    if user:
+        # ✅ Existing user
+        if admin:
+            user_type, user_id = "admin", str(admin.admin_id)
+        elif investigator:
+            user_type, user_id = "investigator", str(investigator.investigator_id)
+        elif invigilator:
+            user_type, user_id = "invigilator", str(invigilator.invigilator_id)
+        elif student:
+            user_type, user_id = "student", str(student.student_id)
+
+    else:
+        # ✅ 4. New user — handle based on email type
+        if is_student_email:
+            # Auto-register student
+            new_student = Student(
+                email=email,
+                name=name,
+                created_at=datetime.utcnow(),
+            )
+            db.add(new_student)
+            db.commit()
+            db.refresh(new_student)
+            user_type = "student"
+            user_id = str(new_student.student_id)
+
+        else:
+            # Redirect to frontend for role selection
+            select_role_url = f"{FRONTEND_URL}/select-role?email={email}&name={name}"
+            return RedirectResponse(url=select_role_url)
+
+    # ✅ 5. Create access token and redirect to dashboard
+    access_token = create_access_token(user_id=user_id, user_type=user_type)
+    frontend_url = f"{FRONTEND_URL}/login-success?token={access_token}&user_type={user_type}&id={user_id}"
+
+    print("-----------------------------------")
+    print(frontend_url)
+    print("-----------------------------------")
+
+    return RedirectResponse(url=frontend_url)
+
+
+@router.post("/register-role")
+def register_role(data: RoleRegisterRequest, db: Session = Depends(get_db)):
+    role = data.role.lower()
+    email = data.email
+    name = data.name
+
+    # Check if already exists
+    existing = (
+        db.query(Admin).filter(Admin.email == email).first()
+        or db.query(Invigilator).filter(Invigilator.email == email).first()
+        or db.query(Investigator).filter(Investigator.email == email).first()
+        or db.query(Student).filter(Student.email == email).first()
+    )
+    if existing:
+        raise HTTPException(status_code=400, detail="User already registered.")
+
+    # Create the appropriate record
+    if role == "admin":
+        user = Admin(email=email, name=name, created_at=datetime.utcnow())
+        db.add(user)
+    elif role == "invigilator":
+        user = Invigilator(email=email, name=name, created_at=datetime.utcnow())
+        db.add(user)
+    elif role == "investigator":
+        user = Investigator(email=email, name=name, created_at=datetime.utcnow())
+        db.add(user)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid role selected.")
+
+    db.commit()
+    db.refresh(user)
+
+    user_id = str(
+        getattr(user, f"{role}_id")
+    )
+    access_token = create_access_token(user_id=user_id, user_type=role)
+
+    return {
+        "access_token": access_token,
+        "user_type": role,
+        "id":user_id,
+}
