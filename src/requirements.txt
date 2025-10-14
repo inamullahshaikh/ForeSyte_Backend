@@ -1,0 +1,13 @@
+authlib==1.6.5
+fastapi==0.119.0
+numpy==2.3.3
+opencv_python==4.12.0.88
+passlib==1.7.4
+pdfplumber==0.11.7
+pydantic==2.12.1
+pymongo==4.15.3
+python-dotenv==1.1.1
+python_jose==3.5.0
+SQLAlchemy==2.0.44
+starlette==0.48.0
+uvicorn
