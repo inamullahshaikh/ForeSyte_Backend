@@ -4,6 +4,10 @@ from fastapi import FastAPI
 from starlette.middleware.sessions import SessionMiddleware
 import os
 from dotenv import load_dotenv
+from fastapi import FastAPI
+from starlette.middleware.sessions import SessionMiddleware
+import os
+from dotenv import load_dotenv
 from database.api.admins import router as admin_router
 from database.api.invigilators import router as invigilator_router
 from database.api.investigators import router as investigator_router
@@ -26,12 +30,17 @@ app = FastAPI(
     version="1.0.0"
 )
 load_dotenv()
+load_dotenv()
 
 # -------------------------
 # CORS Middleware
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173"
@@ -44,8 +53,9 @@ app.add_middleware(
 
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.getenv("SESSION_SECRET", "supersecret_session_key"),  # change to strong random key
+    secret_key=os.getenv("SESSION_SECRET", "supersecret_session_key"),  # change to strong random key
 )
+
 # -------------------------
 # Include Routers
 # -------------------------
