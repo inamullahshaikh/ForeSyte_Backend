@@ -20,6 +20,14 @@ class RoleRegisterRequest(BaseModel):
     email: str
     name: str
     role: str  # admin, invigilator, investigator
+
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    role: str  # admin | invigilator | investigator | student
+
+
 load_dotenv()
 FRONTEND_URL = "http://localhost:5173"
 
@@ -269,4 +277,66 @@ def register_role(data: RoleRegisterRequest, db: Session = Depends(get_db)):
         "access_token": access_token,
         "user_type": role,
         "id": user_id,
+    }
+
+@router.post("/signup", response_model=TokenResponse)
+def signup(data: SignupRequest, db: Session = Depends(get_db)):
+    role = data.role.lower().strip()
+    email = data.email
+    name = data.name
+    password = data.password
+
+    # -------------------------
+    # Check if email exists
+    # -------------------------
+    existing_user = (
+        db.query(Admin).filter(Admin.email == email).first()
+        or db.query(Invigilator).filter(Invigilator.email == email).first()
+        or db.query(Investigator).filter(Investigator.email == email).first()
+        or db.query(Student).filter(Student.email == email).first()
+    )
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered.")
+
+    # -------------------------
+    # Validate role
+    # -------------------------
+    if role not in ["admin", "invigilator", "investigator", "student"]:
+        raise HTTPException(status_code=400, detail="Invalid role provided.")
+
+    # -------------------------
+    # Hash password
+    # -------------------------
+    hashed_password = hash_password(password)
+
+    # -------------------------
+    # Create user in correct table
+    # -------------------------
+    if role == "admin":
+        user = Admin(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
+    elif role == "invigilator":
+        user = Invigilator(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
+    elif role == "investigator":
+        user = Investigator(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
+    elif role == "student":
+        user = Student(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
+
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # -------------------------
+    # Create JWT
+    # -------------------------
+    user_id = str(getattr(user, f"{role}_id"))
+    access_token = create_access_token(user_id=user_id, user_type=role)
+
+    # -------------------------
+    # Return
+    # -------------------------
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user_type": role,
+        "id": user_id
     }
