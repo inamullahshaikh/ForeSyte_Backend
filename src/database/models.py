@@ -53,7 +53,7 @@ class Student(Base):
     roll_number = Column(String, unique=True)
     photo_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
-    password_hash = Column(String, nullable=False)
+    password_hash = Column(String, nullable=True)
 
     activities = relationship("StudentActivity", back_populates="student")
     seat_assignment = relationship("Seat", back_populates="student", uselist=False)
