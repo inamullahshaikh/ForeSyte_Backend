@@ -29,6 +29,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
+.venv
 
 # FastAPI / Uvicorn
 *.log
@@ -42,6 +43,7 @@ venv.bak/
 .env
 .env.local
 .env.*.local
+src/.env
 
 # IDE
 .vscode/
