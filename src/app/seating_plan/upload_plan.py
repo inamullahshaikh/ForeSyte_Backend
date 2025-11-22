@@ -100,7 +100,7 @@ async def upload_seating_plan(
     db: Session = Depends(get_db)
 ):
     global latest_room_data
-    start_time = time.time()
+    processing_start_time = time.time()
     print(f"[DEBUG] Request started | File: {file.filename}")
 
     try:
@@ -315,7 +315,7 @@ async def upload_seating_plan(
             "room_id": str(room.room_id),
             "json_file": str(json_path),
             "annotated_image": str(annotated_path),
-            "processing_time": f"{time.time() - start_time:.2f}s",
+            "processing_time": f"{time.time() - processing_start_time:.2f}s",
         }
 
     except Exception as e:

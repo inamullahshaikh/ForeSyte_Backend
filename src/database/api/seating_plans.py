@@ -6,7 +6,7 @@ from typing import List, Optional
 from pydantic import BaseModel
 
 from database.db import get_db
-from database.models import Room, Seat, Exam
+from database.models import Room, Seat, Exam, Student
 from database.auth import get_current_user
 
 router = APIRouter(prefix="/seating-plans", tags=["Seating Plans"])
@@ -20,6 +20,7 @@ class SeatInfo(BaseModel):
     row: Optional[str] = None
     column: Optional[str] = None
     assigned_student_id: Optional[str] = None
+    assigned_student_name: Optional[str] = None
 
 
 class RoomInfo(BaseModel):
@@ -156,9 +157,15 @@ def get_seating_plan_by_id(
         seat_infos = []
         
         for seat in seats:
+            student_name = None
+            if seat.student_id:
+                student = db.query(Student).filter(Student.student_id == seat.student_id).first()
+                student_name = student.name if student else None
+            
             seat_infos.append(SeatInfo(
                 seat_number=seat.seat_number,
-                assigned_student_id=str(seat.student_id) if seat.student_id else None
+                assigned_student_id=str(seat.student_id) if seat.student_id else None,
+                assigned_student_name=student_name
             ))
             total_seats += 1
         

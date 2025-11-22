@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
+from uuid import UUID
 import os
 import re
 import logging
@@ -75,16 +76,18 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
         model_map = {
-            "admin": Admin,
-            "investigator": Investigator,
-            "invigilator": Invigilator,
-            "student": Student,
+            "admin": (Admin, "admin_id"),
+            "investigator": (Investigator, "investigator_id"),
+            "invigilator": (Invigilator, "invigilator_id"),
+            "student": (Student, "student_id"),
         }
-        user_model = model_map.get(user_type)
-        if not user_model:
+        user_model_info = model_map.get(user_type)
+        if not user_model_info:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user type")
 
-        user = db.query(user_model).filter(user_model.__table__.columns[0] == user_id).first()
+        user_model, id_column = user_model_info
+        # Use getattr to access the ID column dynamically
+        user = db.query(user_model).filter(getattr(user_model, id_column) == UUID(user_id)).first()
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
