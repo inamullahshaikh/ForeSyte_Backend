@@ -11,7 +11,6 @@ import logging
 from pathlib import Path
 
 from .stream_handler import VideoStreamHandler
-from ..ai_engine.behavior_detector import BehaviorDetector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -166,9 +165,12 @@ class VideoProcessor:
             
             # Step 5: Map to student seats
             for behavior in student_behaviors:
-                seat_id = self.behavior_detector.map_detection_to_seat(
-                    behavior, seat_mapping
-                )
+                if self.enable_ai and self.behavior_detector:
+                    seat_id = self.behavior_detector.map_detection_to_seat(
+                        behavior, seat_mapping
+                    )
+                else:
+                    seat_id = None
                 
                 activity = {
                     "timestamp": timestamp.isoformat(),

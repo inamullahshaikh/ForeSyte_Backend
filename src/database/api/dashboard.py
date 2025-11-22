@@ -4,11 +4,13 @@ from sqlalchemy import func, and_
 from datetime import datetime, timedelta
 from typing import List, Optional
 from pydantic import BaseModel
+import logging
 
 from database.db import get_db
 from database.models import Exam, StudentActivity, Student, Room, Seat
 from database.auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
 
@@ -56,7 +58,10 @@ def get_dashboard_stats(
     """
     Get dashboard statistics for admin/investigator.
     """
+    logger.info(f"Dashboard stats requested by user_type: {current_user.get('user_type')}")
+    
     if current_user.get("user_type") not in ["admin", "investigator"]:
+        logger.warning(f"Access denied for user_type: {current_user.get('user_type')}")
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Calculate date range based on period
@@ -165,7 +170,10 @@ def get_activity_data(
     """
     Get activity chart data for incidents and exams over time.
     """
+    logger.info(f"Dashboard activity requested by user_type: {current_user.get('user_type')}")
+    
     if current_user.get("user_type") not in ["admin", "investigator"]:
+        logger.warning(f"Access denied for user_type: {current_user.get('user_type')}")
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Calculate date range
@@ -231,7 +239,10 @@ def get_recent_incidents(
     """
     Get recent incidents for dashboard.
     """
+    logger.info(f"Recent incidents requested by user_type: {current_user.get('user_type')}")
+    
     if current_user.get("user_type") not in ["admin", "investigator"]:
+        logger.warning(f"Access denied for user_type: {current_user.get('user_type')}")
         raise HTTPException(status_code=403, detail="Access denied")
 
     # Get recent student activities (incidents)

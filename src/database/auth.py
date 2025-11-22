@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
 from typing import Optional
@@ -8,12 +9,15 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
 import re
+import logging
 from database.db import get_db
 from database.models import Admin, Invigilator, Investigator, Student
 from authlib.integrations.starlette_client import OAuth
 from fastapi import Request
 from starlette.responses import RedirectResponse
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 class RoleRegisterRequest(BaseModel):
     email: str
@@ -80,7 +84,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         if not user_model:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid user type")
 
-        user = db.query(user_model).filter(user_model._table_.columns[0] == user_id).first()
+        user = db.query(user_model).filter(user_model.__table__.columns[0] == user_id).first()
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -124,8 +128,10 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
     User registration endpoint.
     Creates a new user account based on the selected role.
     """
+    logger.info(f"Signup request received: email={user_data.email}, role={user_data.role}, name={user_data.name}")
     role = user_data.role.lower()
     email = user_data.email.lower()
+    logger.info(f"Processing signup for email={email}, role={role}")
     
     # Validate role
     valid_roles = ["student", "admin", "invigilator", "investigator"]
@@ -162,8 +168,10 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
     user_id = None
     
     try:
+        logger.info(f"Creating {role} user with email={email}")
         if role == "admin":
             # Admin model requires username, use email as username if not provided
+            logger.info(f"Creating Admin user: email={email}, username={email}")
             user = Admin(
                 email=email,
                 username=email,  # Use email as username
@@ -171,9 +179,13 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
                 created_at=datetime.utcnow()
             )
             db.add(user)
+            logger.info("Admin user added to session, committing...")
             db.commit()
+            logger.info("Admin user committed, refreshing...")
             db.refresh(user)
-            user_id = str(user.admin_id)
+            # Convert UUID to string properly
+            user_id = str(user.admin_id) if user.admin_id else None
+            logger.info(f"Admin user created successfully with ID: {user_id}")
             
         elif role == "invigilator":
             user = Invigilator(
@@ -185,7 +197,7 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
             db.add(user)
             db.commit()
             db.refresh(user)
-            user_id = str(user.invigilator_id)
+            user_id = str(user.invigilator_id) if user.invigilator_id else None
             
         elif role == "investigator":
             user = Investigator(
@@ -197,7 +209,7 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
             db.add(user)
             db.commit()
             db.refresh(user)
-            user_id = str(user.investigator_id)
+            user_id = str(user.investigator_id) if user.investigator_id else None
             
         elif role == "student":
             user = Student(
@@ -209,14 +221,23 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
             db.add(user)
             db.commit()
             db.refresh(user)
-            user_id = str(user.student_id)
+            user_id = str(user.student_id) if user.student_id else None
+        
+        if not user_id:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create user: User ID was not generated"
+            )
         
         # Generate access token
+        logger.info(f"Generating access token for user_id={user_id}, user_type={role}")
         access_token = create_access_token(
             user_id=user_id,
             user_type=role,
             expires_delta=timedelta(hours=1)
         )
+        logger.info(f"Signup successful for email={email}, role={role}")
         
         return {
             "access_token": access_token,
@@ -226,11 +247,36 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
             "name": user_data.name
         }
         
+    except IntegrityError as e:
+        db.rollback()
+        error_msg = str(e.orig) if hasattr(e, 'orig') else str(e)
+        logger.error(f"Database integrity error during signup: {error_msg}")
+        
+        # Check if it's a unique constraint violation
+        if "unique" in error_msg.lower() or "duplicate" in error_msg.lower():
+            if "email" in error_msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email already registered. Please login instead."
+                )
+            elif "username" in error_msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Username already taken. Please use a different email."
+                )
+        
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Database error: {error_msg}"
+        )
+        
     except Exception as e:
         db.rollback()
+        error_msg = str(e)
+        logger.error(f"Error during signup for {email} as {role}: {error_msg}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create user: {str(e)}"
+            detail=f"Failed to create user: {error_msg}"
         )
 
 
@@ -242,19 +288,19 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
 
     # Check Admin
     admin = db.query(Admin).filter(Admin.email == credentials.email).first()
-    if admin and verify_password(credentials.password, admin.password_hash):
+    if admin and admin.password_hash and verify_password(credentials.password, admin.password_hash):
         user, user_type, user_id = admin, "admin", str(admin.admin_id)
 
     # Check Investigator
     if not user:
         investigator = db.query(Investigator).filter(Investigator.email == credentials.email).first()
-        if investigator and hasattr(investigator, "password_hash") and verify_password(credentials.password, investigator.password_hash):
+        if investigator and investigator.password_hash and verify_password(credentials.password, investigator.password_hash):
             user, user_type, user_id = investigator, "investigator", str(investigator.investigator_id)
 
     # Check Invigilator
     if not user:
         invigilator = db.query(Invigilator).filter(Invigilator.email == credentials.email).first()
-        if invigilator and hasattr(invigilator, "password_hash") and verify_password(credentials.password, invigilator.password_hash):
+        if invigilator and invigilator.password_hash and verify_password(credentials.password, invigilator.password_hash):
             user, user_type, user_id = invigilator, "invigilator", str(invigilator.invigilator_id)
 
     # Check Student (password)
