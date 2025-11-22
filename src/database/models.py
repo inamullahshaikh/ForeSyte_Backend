@@ -170,3 +170,57 @@ class Notification(Base):
     message = Column(Text, nullable=False)
     read = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# -------------------------------
+#  VIDEO PROCESSING MODELS
+# -------------------------------
+
+class VideoStream(Base):
+    __tablename__ = "video_streams"
+    stream_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    room_id = Column(UUID(as_uuid=True), ForeignKey("rooms.room_id"))
+    exam_id = Column(UUID(as_uuid=True), ForeignKey("exams.exam_id"))
+    stream_type = Column(String, nullable=False)  # 'live' or 'recorded'
+    source_url = Column(Text)  # Camera URL or file path
+    status = Column(String, default="pending")  # pending, processing, completed, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    
+    room = relationship("Room")
+    exam = relationship("Exam")
+    processing_jobs = relationship("ProcessingJob", back_populates="video_stream")
+
+
+class ProcessingJob(Base):
+    __tablename__ = "processing_jobs"
+    job_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    stream_id = Column(UUID(as_uuid=True), ForeignKey("video_streams.stream_id"))
+    status = Column(String, default="queued")  # queued, processing, completed, failed
+    progress = Column(Float, default=0.0)
+    total_frames = Column(Integer)
+    processed_frames = Column(Integer, default=0)
+    detected_activities = Column(Integer, default=0)
+    detected_violations = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    error_message = Column(Text)
+    
+    video_stream = relationship("VideoStream", back_populates="processing_jobs")
+    frame_logs = relationship("FrameLog", back_populates="job")
+
+
+class FrameLog(Base):
+    __tablename__ = "frame_logs"
+    frame_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    job_id = Column(UUID(as_uuid=True), ForeignKey("processing_jobs.job_id"))
+    frame_number = Column(Integer, nullable=False)
+    timestamp = Column(DateTime, nullable=False)
+    detected_objects = Column(Text)  # JSON string of detected objects
+    activity_detected = Column(String)
+    confidence_score = Column(Float)
+    frame_path = Column(Text)  # Path to saved frame image
+    
+    job = relationship("ProcessingJob", back_populates="frame_logs")

@@ -23,12 +23,14 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 MANIFEST
 
+<<<<<<< HEAD
 # PyInstaller
 *.manifest
 *.spec
@@ -324,3 +326,29 @@ docker-compose.override.yml
 .loadpath
 .externalToolBuilders/
 .buildpath
+
+# ============================================
+# Video Files (large files - don't commit to Git)
+# ============================================
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# ============================================
+# Additional Upload Paths
+# ============================================
+# Uploads (large files - don't commit to Git)
+src/uploads/videos/
+src/uploads/frames/
+src/uploads/reports/
+
+# Keep directory structure
+!src/uploads/.gitkeep
+!src/uploads/videos/.gitkeep
+!src/uploads/frames/.gitkeep
+!src/uploads/reports/.gitkeep
+
+# Additional environment variable paths
+src/.env

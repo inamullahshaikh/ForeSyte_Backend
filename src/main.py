@@ -1,13 +1,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 import os
 from dotenv import load_dotenv
-from fastapi import FastAPI
-from starlette.middleware.sessions import SessionMiddleware
-import os
-from dotenv import load_dotenv
+from pathlib import Path
 from database.api.admins import router as admin_router
 from database.api.invigilators import router as invigilator_router
 from database.api.investigators import router as investigator_router
@@ -27,6 +24,7 @@ from database.api.seating_plans import router as seating_plans_router
 from database.api.notifications import router as notifications_router
 from database.auth import router as auth_router
 from app.seating_plan.upload_plan import router as upload_plan_router
+from database.api.video_streams import router as video_stream_router
 # -------------------------
 # FastAPI App
 # -------------------------
@@ -36,7 +34,16 @@ app = FastAPI(
     version="1.0.0"
 )
 load_dotenv()
-load_dotenv()
+
+# -------------------------
+# Static Files (for serving videos and frames to frontend)
+# -------------------------
+# Create uploads directory if it doesn't exist
+uploads_dir = Path("uploads")
+uploads_dir.mkdir(exist_ok=True)
+
+# Mount static files for frontend access
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # -------------------------
 # CORS Middleware
@@ -80,6 +87,7 @@ app.include_router(seating_plans_router)
 app.include_router(notifications_router)
 app.include_router(auth_router)
 app.include_router(upload_plan_router)
+app.include_router(video_stream_router)
 # -------------------------
 # Root Endpoint
 # -------------------------
