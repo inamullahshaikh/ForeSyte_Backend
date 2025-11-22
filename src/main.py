@@ -16,6 +16,12 @@ from database.api.student_activities import router as student_activity_router
 from database.api.invigilator_activities import router as invigilator_activity_router
 from database.api.violations import router as violation_router
 from database.api.reports import router as report_router
+from database.api.dashboard import router as dashboard_router
+from database.api.incidents import router as incidents_router
+from database.api.monitoring import router as monitoring_router
+from database.api.users import router as users_router
+from database.api.seating_plans import router as seating_plans_router
+from database.api.notifications import router as notifications_router
 from database.auth import router as auth_router
 from app.seating_plan.upload_plan import router as upload_plan_router
 from database.api.video_streams import router as video_stream_router
@@ -44,12 +50,12 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
+   
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -73,6 +79,12 @@ app.include_router(student_activity_router)
 app.include_router(invigilator_activity_router)
 app.include_router(violation_router)
 app.include_router(report_router)
+app.include_router(dashboard_router)
+app.include_router(incidents_router)
+app.include_router(monitoring_router)
+app.include_router(users_router)
+app.include_router(seating_plans_router)
+app.include_router(notifications_router)
 app.include_router(auth_router)
 app.include_router(upload_plan_router)
 app.include_router(video_stream_router)

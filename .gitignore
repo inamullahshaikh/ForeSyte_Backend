@@ -1,8 +1,15 @@
+# ============================================
 # Python
+# ============================================
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
+
+# C extensions
 *.so
+
+# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -23,47 +30,319 @@ share/python-wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
-venv/
+<<<<<<< HEAD
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+cover/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy
+
+# Sphinx documentation
+docs/_build/
+
+# PyBuilder
+.pybuilder/
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# pdm
+.pdm.toml
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath parsed files
+*.sage.py
+
+# Environments
+.env
+.venv
 env/
+venv/
 ENV/
 env.bak/
 venv.bak/
-.venv
+.venv/
+virtualenv/
+.virtualenv/
 
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# ============================================
 # FastAPI / Uvicorn
-*.log
-
-# Database
+# ============================================
 *.db
 *.sqlite
 *.sqlite3
 
+# ============================================
 # Environment Variables
+# ============================================
 .env
 .env.local
 .env.*.local
-src/.env
+.env.development
+.env.production
+.env.test
+*.env
 
-# IDE
+# ============================================
+# IDE / Editor
+# ============================================
+# VSCode
 .vscode/
+*.code-workspace
+
+# PyCharm
 .idea/
+*.iml
+*.iws
+*.ipr
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
 *.swp
 *.swo
 *~
+.vim/
+
+# Emacs
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# ============================================
+# OS Files
+# ============================================
+# macOS
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+.AppleDB
+.AppleDesktop
+Network Trash Folder
+Temporary Items
+.apdisk
 
-# Uploads (large files - don't commit to Git)
-src/uploads/videos/
-src/uploads/frames/
-src/uploads/reports/
+# Windows
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+*.stackdump
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.cab
+*.msi
+*.msix
+*.msm
+*.msp
+*.lnk
 
-# Test videos (large files)
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+# ============================================
+# Database
+# ============================================
+*.db
+*.sqlite
+*.sqlite3
+*.sql
+*.db-journal
+
+# PostgreSQL
+*.pgsql
+*.pgdump
+
+# MongoDB
+*.bson
+
+# ============================================
+# Logs
+# ============================================
+*.log
+logs/
+*.log.*
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# ============================================
+# Temporary Files
+# ============================================
+*.tmp
+*.temp
+*.bak
+*.backup
+*.swp
+*.swo
+*~
+.cache/
+
+# ============================================
+# Project Specific
+# ============================================
+# Uploaded files / media
+uploads/
+media/
+static/uploads/
+extractions/
+# Image files in extractions folder
+app/seating_plan/extractions/*.jpg
+app/seating_plan/extractions/*.jpeg
+app/seating_plan/extractions/*.png
+app/seating_plan/extractions/*.gif
+# PDF files in uploads
+app/seating_plan/*.pdf
+# Temporary images
+app/seating_plan/cctv_frame.jpg
+
+# Generated files (be specific - don't ignore all JSON)
+seat_map.json
+# Only ignore JSON files in specific directories
+app/seating_plan/extractions/*.json
+app/seating_plan/seat_map.json
+
+# Configuration files with secrets
+config.ini
+secrets.yaml
+secrets.yml
+
+# ============================================
+# Docker
+# ============================================
+.dockerignore
+docker-compose.override.yml
+
+# ============================================
+# Miscellaneous
+# ============================================
+*.orig
+*.rej
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+.loadpath
+.externalToolBuilders/
+.buildpath
+
+# ============================================
+# Video Files (large files - don't commit to Git)
+# ============================================
 *.mp4
 *.avi
 *.mov
 *.mkv
 *.webm
+
+# ============================================
+# Additional Upload Paths
+# ============================================
+# Uploads (large files - don't commit to Git)
+src/uploads/videos/
+src/uploads/frames/
+src/uploads/reports/
 
 # Keep directory structure
 !src/uploads/.gitkeep
@@ -71,24 +350,5 @@ src/uploads/reports/
 !src/uploads/frames/.gitkeep
 !src/uploads/reports/.gitkeep
 
-# Testing
-.pytest_cache/
-.coverage
-htmlcov/
-*.cover
-
-# Documentation builds
-docs/_build/
-
-# Jupyter Notebook
-.ipynb_checkpoints
-
-# MongoDB
-*.mdb
-
-# Logs
-logs/
-*.log
-
-# OS
-Thumbs.db
+# Additional environment variable paths
+src/.env

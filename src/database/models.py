@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import (
     Column, String, Integer, Date, Time, DateTime, Text,
-    ForeignKey, Float
+    ForeignKey, Float, Boolean
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship, declarative_base
@@ -54,7 +54,6 @@ class Student(Base):
     photo_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     password_hash = Column(String, nullable=True)
-
     activities = relationship("StudentActivity", back_populates="student")
     seat_assignment = relationship("Seat", back_populates="student", uselist=False)
 
@@ -159,6 +158,18 @@ class Report(Base):
 
     violation = relationship("Violation", back_populates="report")
     investigator = relationship("Investigator")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    user_type = Column(String, nullable=False)  # admin, investigator, invigilator, student
+    type = Column(String, nullable=False)  # incident, exam, system, etc.
+    title = Column(String, nullable=False)
+    message = Column(Text, nullable=False)
+    read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # -------------------------------

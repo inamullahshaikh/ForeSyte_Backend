@@ -67,7 +67,15 @@ class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_type: str
-    user_id: str
+    id: str
+
+
+class SignupResponse(BaseModel):
+    access_token: str
+    user_type: str
+    id: str
+    email: str
+    name: str
 
 
 # -------------------------
@@ -83,10 +91,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(user_id: str, user_type: str, expires_delta: Optional[timedelta] = None) -> str:
     """
-    Create JWT with consistent naming: 'user_id' and 'user_type'
+    Create JWT with 'id' and 'user_type' fields for consistency with API endpoints
     """
     expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode = {"user_id": user_id, "user_type": user_type, "exp": expire}
+    to_encode = {"id": user_id, "user_type": user_type, "exp": expire}
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -96,7 +104,7 @@ def create_access_token(user_id: str, user_type: str, expires_delta: Optional[ti
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id: str = payload.get("user_id")
+        user_id: str = payload.get("id")
         user_type: str = payload.get("user_type")
 
         if not user_id or not user_type:
@@ -119,7 +127,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        return {"user_type": user_type, "user_id": user_id, "user": user}
+        return {"user_type": user_type, "id": user_id, "user": user}
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
@@ -165,58 +173,127 @@ def login(credentials: LoginRequest, db: Session = Depends(get_db)):
         "access_token": access_token,
         "token_type": "bearer",
         "user_type": user_type,
-        "user_id": user_id
+        "id": user_id
     }
 
 
 # -------------------------
 # Signup
 # -------------------------
-@router.post("/signup", response_model=TokenResponse)
-def signup(data: SignupRequest, db: Session = Depends(get_db)):
-    role = data.role.lower().strip()
-    email = data.email
-    name = data.name
-    password = data.password
-
-    # Check existing user
-    existing_user = (
-        db.query(Admin).filter(Admin.email == email).first()
-        or db.query(Invigilator).filter(Invigilator.email == email).first()
-        or db.query(Investigator).filter(Investigator.email == email).first()
-        or db.query(Student).filter(Student.email == email).first()
-    )
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered.")
-
+@router.post("/signup", response_model=SignupResponse)
+def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
+    """
+    User registration endpoint.
+    Creates a new user account based on the selected role.
+    """
+    role = user_data.role.lower().strip()
+    email = user_data.email.lower()
+    
     # Validate role
-    if role not in ["admin", "invigilator", "investigator", "student"]:
-        raise HTTPException(status_code=400, detail="Invalid role provided.")
-
-    hashed_password = hash_password(password)
-
-    if role == "admin":
-        user = Admin(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
-    elif role == "invigilator":
-        user = Invigilator(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
-    elif role == "investigator":
-        user = Investigator(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
-    else:
-        user = Student(email=email, name=name, password_hash=hashed_password, created_at=datetime.utcnow())
-
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-
-    user_id = str(getattr(user, f"{role}_id"))
-    access_token = create_access_token(user_id=user_id, user_type=role)
-
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "user_type": role,
-        "user_id": user_id
-    }
+    valid_roles = ["student", "admin", "invigilator", "investigator"]
+    if role not in valid_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+        )
+    
+    # Check if user already exists
+    existing_admin = db.query(Admin).filter(Admin.email == email).first()
+    existing_investigator = db.query(Investigator).filter(Investigator.email == email).first()
+    existing_invigilator = db.query(Invigilator).filter(Invigilator.email == email).first()
+    existing_student = db.query(Student).filter(Student.email == email).first()
+    
+    if existing_admin or existing_investigator or existing_invigilator or existing_student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered. Please login instead."
+        )
+    
+    # Validate password
+    if len(user_data.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters long"
+        )
+    
+    # Hash password
+    password_hash = hash_password(user_data.password)
+    
+    # Create user based on role
+    user = None
+    user_id = None
+    
+    try:
+        if role == "admin":
+            # Admin model requires username, use email as username if not provided
+            user = Admin(
+                email=email,
+                username=email,  # Use email as username
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.admin_id)
+            
+        elif role == "invigilator":
+            user = Invigilator(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.invigilator_id)
+            
+        elif role == "investigator":
+            user = Investigator(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.investigator_id)
+            
+        elif role == "student":
+            user = Student(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.student_id)
+        
+        # Generate access token
+        access_token = create_access_token(
+            user_id=user_id,
+            user_type=role,
+            expires_delta=timedelta(hours=1)
+        )
+        
+        return {
+            "access_token": access_token,
+            "user_type": role,
+            "id": user_id,
+            "email": email,
+            "name": user_data.name
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
 
 
 # -------------------------
@@ -275,7 +352,7 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
             return RedirectResponse(url=select_role_url)
     print(f"User Type: {user_type}, User ID: {user_id}")
     access_token = create_access_token(user_id=user_id, user_type=user_type)
-    frontend_url = f"{FRONTEND_URL}/login-success?token={access_token}&user_type={user_type}&user_id={user_id}"
+    frontend_url = f"{FRONTEND_URL}/login-success?token={access_token}&user_type={user_type}&id={user_id}"
 
     return RedirectResponse(url=frontend_url)
 
@@ -299,7 +376,7 @@ def register_role(data: RoleRegisterRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="User already registered.")
 
     if role == "admin":
-        user = Admin(email=email, name=name, created_at=datetime.utcnow())
+        user = Admin(email=email, username=email, created_at=datetime.utcnow())
     elif role == "invigilator":
         user = Invigilator(email=email, name=name, created_at=datetime.utcnow())
     elif role == "investigator":
@@ -318,5 +395,5 @@ def register_role(data: RoleRegisterRequest, db: Session = Depends(get_db)):
         "access_token": access_token,
         "token_type": "bearer",
         "user_type": role,
-        "user_id": user_id
+        "id": user_id
     }

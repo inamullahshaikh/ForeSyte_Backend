@@ -1,15 +1,19 @@
 # routers/seating_plan.py
-from fastapi import APIRouter, File, UploadFile, Query
+from fastapi import APIRouter, File, UploadFile, Query, Depends, HTTPException
+from sqlalchemy.orm import Session
 import pdfplumber
 import re
 import io
-from datetime import datetime
+from datetime import datetime, date, time as dt_time
 from pathlib import Path
 import time
 import json
 import cv2
 import numpy as np
 from bson import ObjectId
+
+from database.db import get_db
+from database.models import Exam, Room, Seat, Student
 
 router = APIRouter()
 
@@ -36,17 +40,62 @@ def time_slots_match(time1, time2):
         return False
     return normalize_time_slot(time1) == normalize_time_slot(time2)
 
-def clean_mongo_doc(doc):
-    if "_id" in doc:
-        doc["_id"] = str(doc["_id"])
-    return doc
+def parse_date_time(date_str: str, time_str: str):
+    """Parse date and time strings into Python date and time objects."""
+    # Parse date (e.g., "January 15, 2024")
+    months = {
+        'jan': 1, 'feb': 2, 'mar': 3, 'apr': 4, 'may': 5, 'jun': 6,
+        'jul': 7, 'aug': 8, 'sep': 9, 'sept': 9, 'oct': 10, 'nov': 11, 'dec': 12
+    }
+    date_match = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s*(\d{4})', date_str, re.IGNORECASE)
+    if date_match:
+        month_name = date_match.group(1).lower()[:3]
+        day = int(date_match.group(2))
+        year = int(date_match.group(3))
+        month = months.get(month_name, 1)
+        exam_date = date(year, month, day)
+    else:
+        exam_date = date.today()
+    
+    # Parse time (e.g., "10:20 AM to 11:20 AM")
+    time_match = re.search(r'(\d{1,2}):(\d{2})\s*(AM|PM)', time_str, re.IGNORECASE)
+    if time_match:
+        hour = int(time_match.group(1))
+        minute = int(time_match.group(2))
+        am_pm = time_match.group(3).upper()
+        if am_pm == 'PM' and hour != 12:
+            hour += 12
+        elif am_pm == 'AM' and hour == 12:
+            hour = 0
+        start_time = dt_time(hour, minute)
+        
+        # Parse end time
+        end_match = re.search(r'to\s+(\d{1,2}):(\d{2})\s*(AM|PM)', time_str, re.IGNORECASE)
+        if end_match:
+            end_hour = int(end_match.group(1))
+            end_minute = int(end_match.group(2))
+            end_am_pm = end_match.group(3).upper()
+            if end_am_pm == 'PM' and end_hour != 12:
+                end_hour += 12
+            elif end_am_pm == 'AM' and end_hour == 12:
+                end_hour = 0
+            end_time = dt_time(end_hour, end_minute)
+        else:
+            end_time = dt_time(hour + 2, minute)  # Default 2 hours
+    else:
+        start_time = dt_time(9, 0)
+        end_time = dt_time(12, 0)
+    
+    return exam_date, start_time, end_time
+
 
 # -------- Main Endpoint --------
 @router.post("/upload-seating-plan")
 async def upload_seating_plan(
     file: UploadFile = File(...),
     room_no: str = Query(None, description="Room number to extract, e.g. C-301"),
-    time_slot: str = Query(None, description="Time slot to extract, e.g. 10:20 AM to 11:20 AM")
+    time_slot: str = Query(None, description="Time slot to extract, e.g. 10:20 AM to 11:20 AM"),
+    db: Session = Depends(get_db)
 ):
     global latest_room_data
     start_time = time.time()
@@ -140,7 +189,95 @@ async def upload_seating_plan(
         selected_exam = matching_exams[0]
         latest_room_data = selected_exam
 
-        # --- Save JSON ---
+        # Parse date and time
+        exam_date, start_time, end_time = parse_date_time(
+            selected_exam['exam_date'],
+            selected_exam['exam_time']
+        )
+
+        # Create or find Exam
+        course_name = selected_exam.get('course') or 'Unknown Course'
+        existing_exam = db.query(Exam).filter(
+            Exam.course == course_name,
+            Exam.exam_date == exam_date,
+            Exam.start_time == start_time
+        ).first()
+
+        if existing_exam:
+            exam = existing_exam
+        else:
+            exam = Exam(
+                course=course_name,
+                exam_date=exam_date,
+                start_time=start_time,
+                end_time=end_time
+            )
+            db.add(exam)
+            db.commit()
+            db.refresh(exam)
+
+        # Create or find Room
+        room_number = selected_exam['room_no']
+        room_block = room_number.split('-')[0] if '-' in room_number else None
+        room_num = room_number.split('-')[1] if '-' in room_number else room_number
+
+        existing_room = db.query(Room).filter(
+            Room.room_number == room_num,
+            Room.exam_id == exam.exam_id
+        ).first()
+
+        if existing_room:
+            room = existing_room
+        else:
+            room = Room(
+                room_number=room_num,
+                block=room_block,
+                total_seats=len(selected_exam['students']),
+                exam_id=exam.exam_id,
+                camera_id=f"CAM-{room_number}"
+            )
+            db.add(room)
+            db.commit()
+            db.refresh(room)
+
+        # Create or find Students and assign Seats
+        for student_data in selected_exam['students']:
+            roll_number = student_data['roll_no']
+            student_name = student_data['name']
+            
+            # Find or create student
+            student = db.query(Student).filter(Student.roll_number == roll_number).first()
+            if not student:
+                # Generate email from roll number (fallback)
+                email = f"{roll_number.lower().replace('-', '')}@nu.edu.pk"
+                student = Student(
+                    name=student_name,
+                    email=email,
+                    roll_number=roll_number
+                )
+                db.add(student)
+                db.commit()
+                db.refresh(student)
+
+            # Create or update seat assignment
+            seat_number = student_data['seat_no']
+            existing_seat = db.query(Seat).filter(
+                Seat.room_id == room.room_id,
+                Seat.seat_number == seat_number
+            ).first()
+
+            if existing_seat:
+                existing_seat.student_id = student.student_id
+            else:
+                seat = Seat(
+                    room_id=room.room_id,
+                    seat_number=seat_number,
+                    student_id=student.student_id
+                )
+                db.add(seat)
+        
+        db.commit()
+
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         json_filename = f"seating_plan_{selected_exam['room_no']}_{timestamp}.json"
         json_path = EXTRACTIONS_DIR / json_filename
@@ -184,13 +321,13 @@ async def upload_seating_plan(
         cv2.imwrite(str(annotated_path), frame)
 
         return {
-            "message": f"Seating plan extracted for room {selected_exam['room_no']}",
+            "message": f"Seating plan extracted and saved for room {selected_exam['room_no']}",
             "exam_date": selected_exam["exam_date"],
             "exam_time": selected_exam["exam_time"],
             "room_no": selected_exam["room_no"],
-            "course": selected_exam["sections"][0]["course"] if selected_exam["sections"] else None,
-            "sections_count": len(selected_exam["sections"]),
-            "students_count": sum(sec["total_students"] for sec in selected_exam["sections"]),
+            "students_count": len(selected_exam["students"]),
+            "exam_id": str(exam.exam_id),
+            "room_id": str(room.room_id),
             "json_file": str(json_path),
             "annotated_image": str(annotated_path),
             "processing_time": f"{time.time() - start_time:.2f}s",
