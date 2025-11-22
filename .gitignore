@@ -284,19 +284,21 @@ uploads/
 media/
 static/uploads/
 extractions/
-*.jpg
-*.jpeg
-*.png
-*.gif
-*.pdf
-!requirements.txt
+# Image files in extractions folder
+app/seating_plan/extractions/*.jpg
+app/seating_plan/extractions/*.jpeg
+app/seating_plan/extractions/*.png
+app/seating_plan/extractions/*.gif
+# PDF files in uploads
+app/seating_plan/*.pdf
+# Temporary images
+app/seating_plan/cctv_frame.jpg
 
-# Generated files
+# Generated files (be specific - don't ignore all JSON)
 seat_map.json
-*.json
-!package.json
-!tsconfig.json
-!tailwind.config.js
+# Only ignore JSON files in specific directories
+app/seating_plan/extractions/*.json
+app/seating_plan/seat_map.json
 
 # Configuration files with secrets
 config.ini
