@@ -11,7 +11,6 @@ import logging
 from pathlib import Path
 
 from .stream_handler import VideoStreamHandler
-from ..ai_engine.behavior_detector import BehaviorDetector
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,8 +33,13 @@ class VideoProcessor:
         self.stream_handler = VideoStreamHandler()
         self.enable_ai = enable_ai
         if enable_ai:
-            from ..ai_engine.behavior_detector import BehaviorDetector
-            self.behavior_detector = BehaviorDetector()
+            try:
+                from ..ai_engine.behavior_detector import BehaviorDetector
+                self.behavior_detector = BehaviorDetector()
+            except ImportError:
+                logger.warning("AI engine module not found. AI detection disabled.")
+                self.enable_ai = False
+                self.behavior_detector = None
         else:
             self.behavior_detector = None
         self.db_session = db_session

@@ -25,7 +25,6 @@ CCTV_IMAGE_PATH = Path("./app/seating_plan/cctv_frame.jpg")
 
 # -------- Utility Functions --------
 def normalize_time_slot(time_str):
-    """Normalize time slot format for comparison"""
     if not time_str:
         return None
     normalized = re.sub(r'\s+', ' ', time_str.strip().lower())
@@ -33,10 +32,14 @@ def normalize_time_slot(time_str):
     return normalized
 
 def time_slots_match(time1, time2):
-    """Check if two time slots match (allowing format variations)"""
     if not time1 or not time2:
         return False
     return normalize_time_slot(time1) == normalize_time_slot(time2)
+
+def clean_mongo_doc(doc):
+    if "_id" in doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
 
 # -------- Main Endpoint --------
 @router.post("/upload-seating-plan")
@@ -47,24 +50,28 @@ async def upload_seating_plan(
 ):
     global latest_room_data
     start_time = time.time()
-    print(f"[DEBUG] Request started | File: {file.filename}")
 
     try:
+        # --- Read PDF ---
         pdf_bytes = await file.read()
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             text = "\n".join([page.extract_text() or "" for page in pdf.pages])
         text = re.sub(r'\s+', ' ', text)
 
-        block_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?.*?Name\s*of\s*Invigilator:.*?)(?=(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}|$)'
+        # --- Extract blocks based on date/time ---
+        block_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?.*?)(?=(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}|$)'
         all_blocks = re.finditer(block_pattern, text, re.IGNORECASE | re.DOTALL)
 
         matching_exams = []
+
         for block_match in all_blocks:
             block_text = block_match.group(1)
+
+            # --- Extract date, time, room ---
             date_time_match = re.search(
                 r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?)',
                 block_text,
-                re.IGNORECASE,
+                re.IGNORECASE
             )
             room_match = re.search(r'Room\s*No\.?\s*([A-Z]-\d+)', block_text, re.IGNORECASE)
             if not date_time_match or not room_match:
@@ -80,37 +87,51 @@ async def upload_seating_plan(
             if not (room_matches and time_matches):
                 continue
 
-            course_match = re.search(
-                r'((?:CS|EE|SE|AI|DS|SS|CY|MG|MT)\d{4}\s*-\s*[A-Za-z\s&]+)\s+([A-Z]{2,}-\d+[A-Z]?)',
-                block_text,
-            )
-            invigilator_match = re.search(r'Name\s*of\s*Invigilator:\s*([A-Za-z\s]*)', block_text)
+            # --- Extract sections ---
+            section_header_pattern = r'((?:CS|EE|SE|AI|DS|SS|CY|MG|MT)\d{4}\s*-\s*.+?\s+[A-Z0-9-]+)\s+Room No\.[A-Z]-\d+'
+            headers = list(re.finditer(section_header_pattern, block_text, re.IGNORECASE))
 
-            course_name = course_match.group(1).strip() if course_match else None
-            section = course_match.group(2).strip() if course_match else None
-            invigilator_name = invigilator_match.group(1).strip() if invigilator_match else None
+            sections_list = []
 
-            # Extract students
-            pattern = r'(\d+)\s+(\d{2}[A-Z]-\d{4})\s+([A-Za-z\s]+?)\s+(C\dR\d|Chair\d)'
-            students = []
-            for s_no, roll_no, name, seat in re.findall(pattern, block_text):
-                students.append({
-                    "serial_no": s_no.strip(),
-                    "roll_no": roll_no.strip(),
-                    "name": name.strip(),
-                    "seat_no": seat.strip()
+            for i, header in enumerate(headers):
+                start = header.end()
+                end = headers[i+1].start() if i+1 < len(headers) else len(block_text)
+                section_text = block_text[start:end]
+
+                course_section = header.group(1).strip()
+                course_match = re.match(r'((?:CS|EE|SE|AI|DS|SS|CY|MG|MT)\d{4}\s*-\s*.+)\s+([A-Z0-9-]+)', course_section)
+                course_name = course_match.group(1).strip()
+                section_id = course_match.group(2).strip()
+
+                # Extract students in this section
+                student_pattern = r'(\d+)\s+(\d{2}[A-Z]-\d{4})\s+([A-Za-z\s]+?)\s+(C\dR\d|Chair\d)'
+                students = []
+                for s_no, roll_no, name, seat in re.findall(student_pattern, section_text):
+                    students.append({
+                        "serial_no": s_no.strip(),
+                        "roll_no": roll_no.strip(),
+                        "name": name.strip(),
+                        "seat_no": seat.strip()
+                    })
+
+                sections_list.append({
+                    "course": course_name,
+                    "section": section_id,
+                    "students": students,
+                    "total_students": len(students)
                 })
+
+            # --- Extract invigilator (optional fallback) ---
+            invigilator_match = re.search(r'Name\s*of\s*Invigilator:\s*([A-Za-z\s]*)', block_text)
+            invigilator_name = invigilator_match.group(1).strip() if invigilator_match else None
 
             matching_exams.append({
                 "exam_date": exam_date,
                 "exam_time": exam_time,
-                "course": course_name,
-                "section": section,
                 "room_no": detected_room,
                 "invigilator_name": invigilator_name,
-                "students": students,
-                "total_students": len(students),
-                "uploaded_at": datetime.utcnow(),
+                "sections": sections_list,
+                "uploaded_at": datetime.utcnow()
             })
 
         if not matching_exams:
@@ -119,14 +140,14 @@ async def upload_seating_plan(
         selected_exam = matching_exams[0]
         latest_room_data = selected_exam
 
+        # --- Save JSON ---
         timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         json_filename = f"seating_plan_{selected_exam['room_no']}_{timestamp}.json"
         json_path = EXTRACTIONS_DIR / json_filename
-
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(selected_exam, f, indent=4, default=str)
 
-        # ---------- Visualize ----------
+        # --- Visualize seat map ---
         frame = cv2.imread(str(CCTV_IMAGE_PATH))
         if frame is None:
             raise FileNotFoundError("Could not load CCTV image")
@@ -136,9 +157,10 @@ async def upload_seating_plan(
 
         def find_student(seat_id):
             seat_id = seat_id.replace("seat_", "").upper()
-            for s in selected_exam["students"]:
-                if s["seat_no"].upper() == seat_id:
-                    return s
+            for sec in selected_exam["sections"]:
+                for s in sec["students"]:
+                    if s["seat_no"].upper() == seat_id:
+                        return s
             return None
 
         for seat_id, points in seat_map.items():
@@ -165,36 +187,29 @@ async def upload_seating_plan(
             "message": f"Seating plan extracted for room {selected_exam['room_no']}",
             "exam_date": selected_exam["exam_date"],
             "exam_time": selected_exam["exam_time"],
-            "course": selected_exam["course"],
             "room_no": selected_exam["room_no"],
-            "students_count": len(selected_exam["students"]),
+            "course": selected_exam["sections"][0]["course"] if selected_exam["sections"] else None,
+            "sections_count": len(selected_exam["sections"]),
+            "students_count": sum(sec["total_students"] for sec in selected_exam["sections"]),
             "json_file": str(json_path),
             "annotated_image": str(annotated_path),
             "processing_time": f"{time.time() - start_time:.2f}s",
         }
+
 
     except Exception as e:
         import traceback
         traceback.print_exc()
         return {"error": str(e)}
 
-# --------- Utility Routes ---------
+# --------- Utility Route ---------
 @router.get("/get-latest-room")
 async def get_latest_room():
     global latest_room_data
     if not latest_room_data:
         return {"error": "No seating plan extracted yet"}
 
-    if "_id" in latest_room_data and isinstance(latest_room_data["_id"], ObjectId):
-        latest_room_data["_id"] = str(latest_room_data["_id"])
-
     return {
         "message": f"Latest room ({latest_room_data.get('room_no')}) data fetched successfully",
-        "data": latest_room_data,
+        "data": clean_mongo_doc(latest_room_data),
     }
-
-
-def clean_mongo_doc(doc):
-    if "_id" in doc:
-        doc["_id"] = str(doc["_id"])
-    return doc
