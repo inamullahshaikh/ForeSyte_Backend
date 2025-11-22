@@ -24,7 +24,7 @@ class StudentRead(BaseModel):
     student_id: UUID
     name: str
     email: EmailStr
-    roll_number: str
+    roll_number: Optional[str]
     photo_url: Optional[str]
     created_at: datetime
 
@@ -92,12 +92,21 @@ def create_student(
     if existing:
         raise HTTPException(status_code=400, detail="Student with this email already exists")
 
-    new_student = Student(**student.dict())
+    # ✅ ensure roll_number is a valid string
+    roll_number = student.roll_number or student.email.split("@")[0]
+
+    new_student = Student(
+        name=student.name.strip(),
+        email=student.email.lower(),
+        roll_number=roll_number.strip(),
+        photo_url=student.photo_url,
+        created_at=datetime.utcnow()
+    )
+
     db.add(new_student)
     db.commit()
     db.refresh(new_student)
     return new_student
-
 
 @router.get("/", response_model=List[StudentRead])
 def get_students(
@@ -120,16 +129,31 @@ def get_student(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Protected — Student can only access their own record; Admin can access all.
+    Protected — Students can view their own record; Admins can view any.
     """
+    # Fetch the student
     student = db.query(Student).filter(Student.student_id == student_id).first()
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    if current_user.get("user_type") == "student" and str(student.student_id) != current_user.get("user_id"):
-        raise HTTPException(status_code=403, detail="You can only view your own profile")
+    user_type = current_user.get("user_type")
+    user_id = str(current_user.get("id")).strip()  # ✅ fixed key name
 
-    return student
+    print(student)
+    print(user_id)
+    print(student_id)
+    print(current_user)
+
+    # ✅ Allow if Admin or Owner
+    if user_type == "admin" or str(student_id) == current_user.get("user_id"):
+        return student
+
+    # ❌ Otherwise, block
+    raise HTTPException(
+        status_code=403,
+        detail="You are not authorized to view this student record"
+    )
+
 
 
 @router.put("/{student_id}", response_model=StudentRead)

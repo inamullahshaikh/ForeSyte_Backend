@@ -160,3 +160,27 @@ def delete_student_activity(
     db.delete(activity)
     db.commit()
     return None
+
+
+# READ by Student ID (Accessible by Admin, Investigator, and the Student themselves)
+@router.get("/student/{student_id}", response_model=List[StudentActivityRead])
+def get_activities_by_student_id(
+    student_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    user_type = current_user.get("user_type")
+    user_id = current_user.get("user_id")
+
+    if user_type == "invigilator":
+        raise HTTPException(status_code=403, detail="Invigilators are not allowed to access this resource")
+
+    if user_type == "student" and str(user_id) != str(student_id):
+        raise HTTPException(status_code=403, detail="Students can only view their own activities")
+
+    activities = db.query(StudentActivity).filter(StudentActivity.student_id == student_id).all()
+
+    if not activities:
+        raise HTTPException(status_code=404, detail="No activities found for this student")
+
+    return activities

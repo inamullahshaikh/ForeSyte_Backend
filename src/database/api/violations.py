@@ -153,3 +153,33 @@ def delete_violation(
     db.delete(violation)
     db.commit()
     return None
+
+
+# READ by Activity ID (Admin, Investigator, or the Student themselves)
+@router.get("/activity/{activity_id}", response_model=List[ViolationRead])
+def get_violations_by_activity_id(
+    activity_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+
+    user_type = current_user.get("user_type")
+    user_id = current_user.get("user_id")
+
+    if user_type == "invigilator":
+        raise HTTPException(status_code=403, detail="Invigilators are not allowed to access this resource")
+
+
+    activity = db.query(StudentActivity).filter(StudentActivity.activity_id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Student activity not found")
+
+    if user_type == "student" and str(activity.student_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="Students can only view violations for their own activities")
+
+    violations = db.query(Violation).filter(Violation.activity_id == activity_id).all()
+
+    if not violations:
+        raise HTTPException(status_code=404, detail="No violations found for this activity")
+
+    return violations
