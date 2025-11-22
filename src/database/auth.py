@@ -8,8 +8,31 @@ from passlib.context import CryptContext
 from jose import jwt, JWTError
 import os
 import re
+import re
 from database.db import get_db
 from database.models import Admin, Invigilator, Investigator, Student
+from authlib.integrations.starlette_client import OAuth
+from fastapi import Request
+from starlette.responses import RedirectResponse
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+class RoleRegisterRequest(BaseModel):
+    email: str
+    name: str
+    role: str  # admin, invigilator, investigator
+load_dotenv()
+FRONTEND_URL = "http://localhost:5173"
+
+oauth = OAuth()
+google = oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
+
 from authlib.integrations.starlette_client import OAuth
 from fastapi import Request
 from starlette.responses import RedirectResponse
@@ -96,11 +119,142 @@ class LoginRequest(BaseModel):
     password: Optional[str] = None  # password required for all except maybe some students
 
 
+class SignupRequest(BaseModel):
+    name: str
+    email: EmailStr
+    password: str
+    role: str  # student, admin, invigilator, investigator
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user_type: str
     id: str
+
+
+class SignupResponse(BaseModel):
+    access_token: str
+    user_type: str
+    id: str
+    email: str
+    name: str
+
+
+@router.post("/signup", response_model=SignupResponse)
+def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
+    """
+    User registration endpoint.
+    Creates a new user account based on the selected role.
+    """
+    role = user_data.role.lower()
+    email = user_data.email.lower()
+    
+    # Validate role
+    valid_roles = ["student", "admin", "invigilator", "investigator"]
+    if role not in valid_roles:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}"
+        )
+    
+    # Check if user already exists
+    existing_admin = db.query(Admin).filter(Admin.email == email).first()
+    existing_investigator = db.query(Investigator).filter(Investigator.email == email).first()
+    existing_invigilator = db.query(Invigilator).filter(Invigilator.email == email).first()
+    existing_student = db.query(Student).filter(Student.email == email).first()
+    
+    if existing_admin or existing_investigator or existing_invigilator or existing_student:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered. Please login instead."
+        )
+    
+    # Validate password
+    if len(user_data.password) < 6:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password must be at least 6 characters long"
+        )
+    
+    # Hash password
+    password_hash = hash_password(user_data.password)
+    
+    # Create user based on role
+    user = None
+    user_id = None
+    
+    try:
+        if role == "admin":
+            # Admin model requires username, use email as username if not provided
+            user = Admin(
+                email=email,
+                username=email,  # Use email as username
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.admin_id)
+            
+        elif role == "invigilator":
+            user = Invigilator(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.invigilator_id)
+            
+        elif role == "investigator":
+            user = Investigator(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.investigator_id)
+            
+        elif role == "student":
+            user = Student(
+                email=email,
+                name=user_data.name,
+                password_hash=password_hash,
+                created_at=datetime.utcnow()
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            user_id = str(user.student_id)
+        
+        # Generate access token
+        access_token = create_access_token(
+            user_id=user_id,
+            user_type=role,
+            expires_delta=timedelta(hours=1)
+        )
+        
+        return {
+            "access_token": access_token,
+            "user_type": role,
+            "id": user_id,
+            "email": email,
+            "name": user_data.name
+        }
+        
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create user: {str(e)}"
+        )
 
 
 @router.post("/login", response_model=TokenResponse)
