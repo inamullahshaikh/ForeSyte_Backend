@@ -1,10 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 import os
+import logging
 from dotenv import load_dotenv
 from pathlib import Path
+import traceback
 from database.api.admins import router as admin_router
 from database.api.invigilators import router as invigilator_router
 from database.api.investigators import router as investigator_router
@@ -26,6 +29,18 @@ from database.auth import router as auth_router
 from app.seating_plan.upload_plan import router as upload_plan_router
 from database.api.video_streams import router as video_stream_router
 # -------------------------
+# Logging Configuration
+# -------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# -------------------------
 # FastAPI App
 # -------------------------
 app = FastAPI(
@@ -34,6 +49,42 @@ app = FastAPI(
     version="1.0.0"
 )
 load_dotenv()
+
+# -------------------------
+# Request Logging Middleware
+# -------------------------
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    logger.info(f"=== Incoming request: {request.method} {request.url.path} ===")
+    logger.info(f"Client: {request.client.host if request.client else 'unknown'}")
+    logger.info(f"Query params: {dict(request.query_params)}")
+    
+    try:
+        response = await call_next(request)
+        logger.info(f"=== Response: {response.status_code} for {request.method} {request.url.path} ===")
+        return response
+    except Exception as e:
+        logger.error(f"=== ERROR processing {request.method} {request.url.path}: {str(e)} ===", exc_info=True)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"detail": f"Internal server error: {str(e)}"}
+        )
+
+# -------------------------
+# Global Exception Handler
+# -------------------------
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled exception: {str(exc)}", exc_info=True)
+    logger.error(f"Request URL: {request.url}")
+    logger.error(f"Request method: {request.method}")
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={
+            "detail": f"Internal server error: {str(exc)}",
+            "type": type(exc).__name__
+        }
+    )
 
 # -------------------------
 # Static Files (for serving videos and frames to frontend)
@@ -50,12 +101,14 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-   
     allow_origins=[
         "http://localhost:5173",
-        "http://127.0.0.1:5173"
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000"
     ],
     allow_credentials=True,
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -93,5 +146,12 @@ app.include_router(video_stream_router)
 # -------------------------
 @app.get("/")
 def root():
+    logger.info("Root endpoint accessed")
     return {"message": "Welcome to the ForeSyte API!"}
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    logger.info("Health check endpoint accessed")
+    return {"status": "healthy", "message": "API is running"}
 
