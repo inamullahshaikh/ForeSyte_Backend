@@ -20,6 +20,9 @@ class Admin(Base):
     username = Column(String, unique=True, nullable=False)
     email = Column(String, unique=True, nullable=False)
     password_hash = Column(String, nullable=True)
+    # Status column - commented out until database migration is run
+    # After running migration to add status column, uncomment the line below:
+    # status = Column(String, default="active")  # active, suspended, inactive
     created_at = Column(DateTime, default=datetime.utcnow)
 
 
@@ -31,6 +34,9 @@ class Invigilator(Base):
     photo_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     password_hash = Column(String, nullable=True)
+    # Status column - commented out until database migration is run
+    # After running migration to add status column, uncomment the line below:
+    # status = Column(String, default="active")  # active, suspended, inactive
 
     activities = relationship("InvigilatorActivity", back_populates="invigilator")
 
@@ -43,6 +49,9 @@ class Investigator(Base):
     designation = Column(String)
     created_at = Column(DateTime, default=datetime.utcnow)
     password_hash = Column(String, nullable=True)
+    # Status column - commented out until database migration is run
+    # After running migration to add status column, uncomment the line below:
+    # status = Column(String, default="active")  # active, suspended, inactive
 
 
 class Student(Base):
@@ -54,6 +63,9 @@ class Student(Base):
     photo_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     password_hash = Column(String, nullable=True)
+    # Status column - commented out until database migration is run
+    # After running migration to add status column, uncomment the line below:
+    # status = Column(String, default="active")  # active, suspended, inactive
     activities = relationship("StudentActivity", back_populates="student")
     seat_assignment = relationship("Seat", back_populates="student", uselist=False)
 

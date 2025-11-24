@@ -34,6 +34,20 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     user_type: Optional[str] = None
     status: Optional[str] = None
+    password: Optional[str] = None
+
+
+class UserCreate(BaseModel):
+    name: str
+    email: EmailStr
+    user_type: str
+    password: str
+    status: Optional[str] = "active"
+    # Optional fields for specific user types
+    username: Optional[str] = None  # For admin
+    roll_number: Optional[str] = None  # For student
+    designation: Optional[str] = None  # For investigator
+    photo_url: Optional[str] = None  # For invigilator/student
 
 
 class UserListResponse(BaseModel):
@@ -78,7 +92,7 @@ def convert_user_to_read(user, user_type: str) -> UserRead:
         name=getattr(user, "name", getattr(user, "username", "Unknown")),
         email=user.email,
         user_type=user_type,
-        status="active",  # Default status, can be extended
+        status=getattr(user, "status", "active"),  # Get status from model or default to active
         created_at=getattr(user, "created_at", None),
         last_login=None  # Can be added if last_login tracking is implemented
     )
@@ -199,6 +213,84 @@ def get_all_users(
 
 
 # -------------------------
+# Create User (Admin Only)
+# -------------------------
+@router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
+def create_user(
+    user_data: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create a new user (Admin only).
+    """
+    if current_user.get("user_type") != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create users")
+    
+    user_type = user_data.user_type.lower()
+    if user_type not in ["admin", "investigator", "invigilator", "student"]:
+        raise HTTPException(status_code=400, detail="Invalid user type")
+    
+    model = get_user_model(user_type)
+    if not model:
+        raise HTTPException(status_code=400, detail="Invalid user type")
+    
+    # Check if email already exists
+    existing = db.query(model).filter(model.email == user_data.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    
+    # Import hash_password from auth
+    from database.auth import hash_password
+    
+    # Create user based on type
+    if user_type == "admin":
+        new_user = Admin(
+            username=user_data.username or user_data.email,
+            email=user_data.email,
+            password_hash=hash_password(user_data.password),
+            # status field will be available after database migration
+            # status=user_data.status or "active"
+        )
+    elif user_type == "invigilator":
+        new_user = Invigilator(
+            name=user_data.name,
+            email=user_data.email,
+            password_hash=hash_password(user_data.password),
+            photo_url=user_data.photo_url,
+            # status field will be available after database migration
+            # status=user_data.status or "active"
+        )
+    elif user_type == "investigator":
+        new_user = Investigator(
+            name=user_data.name,
+            email=user_data.email,
+            designation=user_data.designation,
+            password_hash=hash_password(user_data.password),
+            # status field will be available after database migration
+            # status=user_data.status or "active"
+        )
+    elif user_type == "student":
+        if not user_data.roll_number:
+            raise HTTPException(status_code=400, detail="roll_number is required for students")
+        new_user = Student(
+            name=user_data.name,
+            email=user_data.email,
+            roll_number=user_data.roll_number,
+            photo_url=user_data.photo_url,
+            password_hash=hash_password(user_data.password),
+            # status field will be available after database migration
+            # status=user_data.status or "active"
+        )
+    
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return convert_user_to_read(new_user, user_type)
+
+
+# -------------------------
 # Get User by ID
 # -------------------------
 @router.get("/{user_id}", response_model=UserRead)
@@ -242,6 +334,7 @@ def update_user(
 ):
     """
     Update a user (Admin only).
+    Admins cannot update other admin users.
     """
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=403, detail="Only admins can update users")
@@ -267,6 +360,10 @@ def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     
+    # Prevent admins from editing other admins
+    if user_type == "admin":
+        raise HTTPException(status_code=403, detail="Admins cannot edit other admin users")
+    
     # Update fields
     if update.name is not None:
         if hasattr(user, "name"):
@@ -283,8 +380,14 @@ def update_user(
         user.email = update.email
     
     if update.status is not None:
-        # Status can be stored in a separate field or handled differently
-        pass  # Implement status tracking if needed
+        # Update status field
+        if hasattr(user, "status"):
+            user.status = update.status
+    
+    if update.password is not None:
+        # Update password
+        from database.auth import hash_password
+        user.password_hash = hash_password(update.password)
     
     if update.user_type is not None and update.user_type != user_type:
         # User type change would require migration - implement if needed
@@ -307,20 +410,26 @@ def delete_user(
 ):
     """
     Delete a user (Admin only).
+    Admins cannot delete other admin users.
     """
     if current_user.get("user_type") != "admin":
         raise HTTPException(status_code=403, detail="Only admins can delete users")
     
     # Find and delete user
-    for user_type in ["admin", "investigator", "invigilator", "student"]:
-        model = get_user_model(user_type)
+    user_type = None
+    for ut in ["admin", "investigator", "invigilator", "student"]:
+        model = get_user_model(ut)
         if not model:
             continue
         
-        id_field = get_user_id_field(user_type)
+        id_field = get_user_id_field(ut)
         try:
             user = db.query(model).filter(getattr(model, id_field) == UUID(user_id)).first()
             if user:
+                user_type = ut
+                # Prevent admins from deleting other admins
+                if ut == "admin":
+                    raise HTTPException(status_code=403, detail="Admins cannot delete other admin users")
                 db.delete(user)
                 db.commit()
                 return None
