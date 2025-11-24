@@ -10,7 +10,7 @@ from database.db import get_db
 from database.models import Room, Seat, Exam, Student
 from database.auth import get_current_user
 
-router = APIRouter(prefix="/seating-plans", tags=["Seating Plans"])
+router = APIRouter()
 
 
 # -------------------------
