@@ -139,13 +139,8 @@ def get_student(
     user_type = current_user.get("user_type")
     user_id = str(current_user.get("id")).strip()  # ✅ fixed key name
 
-    print(student)
-    print(user_id)
-    print(student_id)
-    print(current_user)
-
     # ✅ Allow if Admin or Owner
-    if user_type == "admin" or str(student_id) == current_user.get("user_id"):
+    if user_type == "admin" or str(student_id) == current_user.get("id"):
         return student
 
     # ❌ Otherwise, block
@@ -170,7 +165,7 @@ def update_student(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    if current_user.get("user_type") == "student" and str(student.student_id) != current_user.get("user_id"):
+    if current_user.get("user_type") == "student" and str(student.student_id) != current_user.get("id"):
         raise HTTPException(status_code=403, detail="You can only update your own profile")
 
     for key, value in updated.dict(exclude_unset=True).items():

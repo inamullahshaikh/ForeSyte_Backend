@@ -170,7 +170,7 @@ def get_activities_by_student_id(
     current_user: dict = Depends(get_current_user)
 ):
     user_type = current_user.get("user_type")
-    user_id = current_user.get("user_id")
+    user_id = current_user.get("id")
 
     if user_type == "invigilator":
         raise HTTPException(status_code=403, detail="Invigilators are not allowed to access this resource")

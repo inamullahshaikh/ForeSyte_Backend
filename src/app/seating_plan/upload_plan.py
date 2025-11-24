@@ -10,22 +10,25 @@ import time
 import json
 import cv2
 import numpy as np
-from bson import ObjectId
+from typing import List, Dict, Optional
 
 from database.db import get_db
 from database.models import Exam, Room, Seat, Student
+from .room_config import RoomConfigManager, SeatMapManager, CCTVFrameManager
 
-router = APIRouter()
+router = APIRouter(prefix="/seating-plan", tags=["Seating Plan"])
 
 # Global store for latest extracted room
 latest_room_data = {}
 
 # Paths for storage and visualization
 EXTRACTIONS_DIR = Path("./app/seating_plan/extractions")
-EXTRACTIONS_DIR.mkdir(exist_ok=True)
+EXTRACTIONS_DIR.mkdir(exist_ok=True, parents=True)
 
-SEAT_MAP_PATH = Path("./app/seating_plan/seat_map.json")
-CCTV_IMAGE_PATH = Path("./app/seating_plan/cctv_frame.jpg")
+# Initialize managers
+room_config_manager = RoomConfigManager()
+seat_map_manager = SeatMapManager()
+cctv_manager = CCTVFrameManager()
 
 # -------- Utility Functions --------
 def normalize_time_slot(time_str):
@@ -98,7 +101,7 @@ async def upload_seating_plan(
     db: Session = Depends(get_db)
 ):
     global latest_room_data
-    start_time = time.time()
+    process_start_time = time.time()
 
     try:
         # --- Read PDF ---
@@ -229,10 +232,11 @@ async def upload_seating_plan(
         if existing_room:
             room = existing_room
         else:
+            total_students = sum(len(sec.get("students", [])) for sec in selected_exam.get("sections", []))
             room = Room(
                 room_number=room_num,
                 block=room_block,
-                total_seats=len(selected_exam['students']),
+                total_seats=total_students,
                 exam_id=exam.exam_id,
                 camera_id=f"CAM-{room_number}"
             )
@@ -240,8 +244,13 @@ async def upload_seating_plan(
             db.commit()
             db.refresh(room)
 
+        # Flatten students from all sections
+        all_students = []
+        for section in selected_exam.get('sections', []):
+            all_students.extend(section.get('students', []))
+
         # Create or find Students and assign Seats
-        for student_data in selected_exam['students']:
+        for student_data in all_students:
             roll_number = student_data['roll_no']
             student_name = student_data['name']
             
@@ -284,37 +293,86 @@ async def upload_seating_plan(
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(selected_exam, f, indent=4, default=str)
 
-        # --- Visualize seat map ---
-        frame = cv2.imread(str(CCTV_IMAGE_PATH))
+        # --- Visualize seat map using room configuration ---
+        room_id = selected_exam['room_no']
+        room_config = room_config_manager.get_or_create_config(room_id)
+        
+        # Get CCTV frame for this room
+        cctv_path = cctv_manager.get_frame_path(room_id)
+        if not cctv_path or not cctv_path.exists():
+            raise FileNotFoundError(f"Could not load CCTV image for room {room_id}. Please upload a CCTV frame for this room.")
+        
+        frame = cv2.imread(str(cctv_path))
         if frame is None:
-            raise FileNotFoundError("Could not load CCTV image")
+            raise FileNotFoundError(f"Could not load CCTV image from {cctv_path}")
 
-        with open(SEAT_MAP_PATH) as f:
-            seat_map = json.load(f)["seats"]
+        # Get seat map for this room
+        seat_map = seat_map_manager.get_seat_map(room_id)
+        if not seat_map:
+            raise FileNotFoundError(f"Could not load seat map for room {room_id}. Please configure a seat map for this room.")
 
-        def find_student(seat_id):
-            seat_id = seat_id.replace("seat_", "").upper()
+        def find_student(seat_id: str) -> Optional[Dict]:
+            """Find student assigned to a seat"""
+            # Normalize seat ID based on room's numbering scheme
+            normalized_seat_id = seat_map_manager.normalize_seat_id(
+                seat_id, 
+                room_config.seat_numbering_scheme
+            )
+            
+            # Try to match seat in seat map
+            matched_seat = seat_map_manager.match_seat(
+                seat_id,
+                seat_map,
+                room_config.seat_numbering_scheme
+            )
+            
+            if not matched_seat:
+                return None
+            
+            # Find student in extracted data
+            seat_id_clean = seat_id.upper().strip()
             for sec in selected_exam["sections"]:
                 for s in sec["students"]:
-                    if s["seat_no"].upper() == seat_id:
+                    if s["seat_no"].upper().strip() == seat_id_clean:
                         return s
             return None
 
+        # Scale coordinates if image resolution differs from seat map
+        frame_height, frame_width = frame.shape[:2]
+        seat_map_meta = seat_map_manager.get_seat_map_metadata(room_id)
+        scale_x = frame_width / (seat_map_meta.get("base_w", frame_width) or frame_width)
+        scale_y = frame_height / (seat_map_meta.get("base_h", frame_height) or frame_height)
+        
+        # Annotate frame with seat assignments
         for seat_id, points in seat_map.items():
-            pts = np.array([tuple(p) for p in points], np.int32)
+            # Scale points to match current frame resolution
+            scaled_points = [
+                [int(p[0] * scale_x), int(p[1] * scale_y)] 
+                for p in points
+            ]
+            pts = np.array(scaled_points, np.int32)
             cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
 
-            student = find_student(seat_id)
-            text = f"{student['name']} ({student['roll_no']})" if student else f"[{seat_id}]"
+            # Extract seat number from seat_id (e.g., "seat_c1r1" -> "C1R1")
+            seat_number = seat_id.replace("seat_", "").upper()
+            student = find_student(seat_number)
+            
+            if student:
+                text = f"{student['name']} ({student['roll_no']})"
+                color = (0, 0, 255)  # Red for assigned
+            else:
+                text = f"[{seat_number}]"
+                color = (128, 128, 128)  # Gray for unassigned
 
+            # Calculate center of polygon for text placement (using scaled points)
             M = cv2.moments(pts)
             if M["m00"] != 0:
                 cx, cy = int(M["m10"]/M["m00"]), int(M["m01"]/M["m00"])
             else:
-                cx, cy = pts[0]
+                cx, cy = pts[0] if len(pts) > 0 else (0, 0)
 
             (w, h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
-            cv2.putText(frame, text, (cx - w//2, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+            cv2.putText(frame, text, (cx - w//2, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
 
         annotated_filename = f"annotated_{selected_exam['room_no']}_{timestamp}.jpg"
         annotated_path = EXTRACTIONS_DIR / annotated_filename
@@ -325,12 +383,12 @@ async def upload_seating_plan(
             "exam_date": selected_exam["exam_date"],
             "exam_time": selected_exam["exam_time"],
             "room_no": selected_exam["room_no"],
-            "students_count": len(selected_exam["students"]),
+            "students_count": sum(len(sec.get("students", [])) for sec in selected_exam.get("sections", [])),
             "exam_id": str(exam.exam_id),
             "room_id": str(room.room_id),
             "json_file": str(json_path),
             "annotated_image": str(annotated_path),
-            "processing_time": f"{time.time() - start_time:.2f}s",
+            "processing_time": f"{time.time() - process_start_time:.2f}s",
         }
 
 
@@ -339,14 +397,131 @@ async def upload_seating_plan(
         traceback.print_exc()
         return {"error": str(e)}
 
-# --------- Utility Route ---------
+# --------- Utility Routes ---------
 @router.get("/get-latest-room")
 async def get_latest_room():
+    """Get the latest extracted room data"""
     global latest_room_data
     if not latest_room_data:
         return {"error": "No seating plan extracted yet"}
 
     return {
         "message": f"Latest room ({latest_room_data.get('room_no')}) data fetched successfully",
-        "data": clean_mongo_doc(latest_room_data),
+        "data": latest_room_data,
     }
+
+
+# --------- Room Configuration Routes ---------
+@router.get("/rooms")
+async def list_rooms():
+    """List all configured rooms"""
+    configs = room_config_manager.list_configs()
+    return {
+        "rooms": [config.to_dict() for config in configs],
+        "total": len(configs)
+    }
+
+
+@router.get("/rooms/{room_id}")
+async def get_room_config(room_id: str):
+    """Get configuration for a specific room"""
+    config = room_config_manager.get_config(room_id)
+    if not config:
+        raise HTTPException(status_code=404, detail=f"Room {room_id} not found")
+    return config.to_dict()
+
+
+@router.post("/rooms/{room_id}/config")
+async def set_room_config(
+    room_id: str,
+    seat_map_path: Optional[str] = Query(None),
+    cctv_frame_path: Optional[str] = Query(None),
+    seat_numbering_scheme: str = Query("column_row", description="column_row, chair_number, or custom"),
+    room_name: Optional[str] = Query(None)
+):
+    """Set or update room configuration"""
+    from .room_config import RoomConfig
+    
+    config = room_config_manager.get_or_create_config(room_id)
+    
+    if seat_map_path:
+        config.seat_map_path = seat_map_path
+    if cctv_frame_path:
+        config.cctv_frame_path = cctv_frame_path
+    if seat_numbering_scheme:
+        config.seat_numbering_scheme = seat_numbering_scheme
+    if room_name:
+        config.room_name = room_name
+    
+    room_config_manager.set_config(config)
+    return {"message": f"Configuration updated for room {room_id}", "config": config.to_dict()}
+
+
+@router.post("/rooms/{room_id}/cctv-frame")
+async def upload_cctv_frame(
+    room_id: str,
+    file: UploadFile = File(...)
+):
+    """Upload CCTV frame for a room"""
+    frame_data = await file.read()
+    frame_path = cctv_manager.save_frame(room_id, frame_data, file.filename.split('.')[-1])
+    
+    # Update room config
+    config = room_config_manager.get_or_create_config(room_id)
+    config.cctv_frame_path = str(frame_path)
+    room_config_manager.set_config(config)
+    
+    return {
+        "message": f"CCTV frame uploaded for room {room_id}",
+        "path": str(frame_path)
+    }
+
+
+@router.post("/rooms/{room_id}/seat-map")
+async def upload_seat_map(
+    room_id: str,
+    seat_map_data: Dict
+):
+    """Upload or update seat map for a room"""
+    seats = seat_map_data.get("seats", seat_map_data)
+    metadata = seat_map_data.get("_meta", {})
+    seat_map_manager.save_seat_map(room_id, seats, metadata)
+    
+    # Update room config
+    config = room_config_manager.get_or_create_config(room_id)
+    config.seat_map_path = str(seat_map_manager.seat_maps_dir / f"{room_id.upper()}.json")
+    room_config_manager.set_config(config)
+    
+    return {
+        "message": f"Seat map saved for room {room_id}",
+        "seats_count": len(seats)
+    }
+
+
+@router.get("/rooms/{room_id}/seat-map")
+async def get_seat_map(room_id: str):
+    """Get seat map for a room"""
+    seat_map = seat_map_manager.get_seat_map(room_id)
+    if not seat_map:
+        raise HTTPException(status_code=404, detail=f"Seat map not found for room {room_id}")
+    return {"seats": seat_map}
+
+
+@router.get("/annotator")
+async def get_annotator():
+    """Serve the seat boundary annotator tool"""
+    from fastapi.responses import FileResponse
+    annotator_path = Path(__file__).parent / "seat_annotator.html"
+    if not annotator_path.exists():
+        raise HTTPException(status_code=404, detail="Annotator tool not found")
+    return FileResponse(annotator_path)
+
+
+@router.get("/rooms/{room_id}/cctv-image")
+async def get_cctv_image(room_id: str):
+    """Get CCTV frame image for annotation"""
+    from fastapi.responses import FileResponse
+    cctv_path = cctv_manager.get_frame_path(room_id)
+    if not cctv_path or not cctv_path.exists():
+        raise HTTPException(status_code=404, detail=f"CCTV frame not found for room {room_id}")
+    return FileResponse(cctv_path)

@@ -164,7 +164,7 @@ def get_violations_by_activity_id(
 ):
 
     user_type = current_user.get("user_type")
-    user_id = current_user.get("user_id")
+    user_id = current_user.get("id")
 
     if user_type == "invigilator":
         raise HTTPException(status_code=403, detail="Invigilators are not allowed to access this resource")
