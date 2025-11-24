@@ -67,17 +67,22 @@ def get_seating_plans(
     """
     Get all seating plans with pagination.
     """
-    # Get all rooms grouped by exam (each exam represents a seating plan)
-    query = db.query(Exam).join(Room)
+    # Get all exams that have at least one room (seating plan)
+    from datetime import date as date_class
+    
+    # Simple join approach - get all exams that have rooms
+    query = db.query(Exam).join(Room, Exam.exam_id == Room.exam_id)
     
     if status:
         # Filter by exam date to determine status
+        today = date_class.today()
         if status == "completed":
-            query = query.filter(Exam.exam_date < datetime.utcnow().date())
+            query = query.filter(Exam.exam_date < today)
         elif status == "processing":
-            query = query.filter(Exam.exam_date >= datetime.utcnow().date())
+            query = query.filter(Exam.exam_date >= today)
     
-    exams = query.distinct().all()
+    # Get distinct exams ordered by creation date (most recent first)
+    exams = query.distinct().order_by(Exam.created_at.desc()).all()
     
     plans = []
     for exam in exams:
@@ -105,8 +110,9 @@ def get_seating_plans(
                 seats=seat_infos
             ))
         
-        # Determine status
-        plan_status = "completed" if exam.exam_date < datetime.utcnow().date() else "processing"
+        # Determine status based on exam date
+        today = date_class.today()
+        plan_status = "completed" if exam.exam_date and exam.exam_date < today else "processing"
         
         plans.append(SeatingPlanRead(
             id=str(exam.exam_id),
@@ -117,6 +123,9 @@ def get_seating_plans(
             total_seats=total_seats,
             rooms=room_infos
         ))
+    
+    # Sort plans by uploaded_at (most recent first) if available, otherwise by exam date
+    plans.sort(key=lambda x: x.uploaded_at if x.uploaded_at else datetime.min.replace(tzinfo=None), reverse=True)
     
     # Apply pagination
     total = len(plans)
