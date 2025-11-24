@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError, StatementError
 from uuid import UUID
 from datetime import datetime
 from typing import List, Optional
@@ -70,74 +71,156 @@ def get_seating_plans(
     # Get all exams that have at least one room (seating plan)
     from datetime import date as date_class
     
-    # Simple join approach - get all exams that have rooms
-    query = db.query(Exam).join(Room, Exam.exam_id == Room.exam_id)
-    
-    if status:
-        # Filter by exam date to determine status
-        today = date_class.today()
-        if status == "completed":
-            query = query.filter(Exam.exam_date < today)
-        elif status == "processing":
-            query = query.filter(Exam.exam_date >= today)
-    
-    # Get distinct exams ordered by creation date (most recent first)
-    exams = query.distinct().order_by(Exam.created_at.desc()).all()
-    
-    plans = []
-    for exam in exams:
-        rooms = db.query(Room).filter(Room.exam_id == exam.exam_id).all()
+    try:
+        # First, get all unique exam IDs that have rooms
+        room_exam_ids = db.query(Room.exam_id).distinct().all()
+        exam_ids_list = [exam_id[0] for exam_id in room_exam_ids if exam_id[0] is not None]
         
-        room_infos = []
-        total_seats = 0
+        if not exam_ids_list:
+            # No seating plans found
+            return SeatingPlanListResponse(
+                plans=[],
+                total=0,
+                page=page,
+                limit=limit
+            )
         
-        for room in rooms:
-            seats = db.query(Seat).filter(Seat.room_id == room.room_id).all()
-            seat_infos = []
+        # Query exams that have rooms
+        query = db.query(Exam).filter(Exam.exam_id.in_(exam_ids_list))
+        
+        if status:
+            # Filter by exam date to determine status
+            today = date_class.today()
+            if status == "completed":
+                query = query.filter(Exam.exam_date < today)
+            elif status == "processing":
+                query = query.filter(Exam.exam_date >= today)
+        
+        # Get exams ordered by creation date (most recent first)
+        exams = query.order_by(Exam.created_at.desc()).all()
+    except (OperationalError, StatementError) as e:
+        # Handle database transaction errors
+        db.rollback()
+        # Retry once after rollback
+        try:
+            room_exam_ids = db.query(Room.exam_id).distinct().all()
+            exam_ids_list = [exam_id[0] for exam_id in room_exam_ids if exam_id[0] is not None]
             
-            for seat in seats:
-                seat_infos.append(SeatInfo(
-                    seat_number=seat.seat_number,
-                    assigned_student_id=str(seat.student_id) if seat.student_id else None
+            if not exam_ids_list:
+                return SeatingPlanListResponse(plans=[], total=0, page=page, limit=limit)
+            
+            query = db.query(Exam).filter(Exam.exam_id.in_(exam_ids_list))
+            if status:
+                today = date_class.today()
+                if status == "completed":
+                    query = query.filter(Exam.exam_date < today)
+                elif status == "processing":
+                    query = query.filter(Exam.exam_date >= today)
+            exams = query.order_by(Exam.created_at.desc()).all()
+        except Exception as retry_error:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error fetching seating plans after retry: {str(retry_error)}"
+            )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error fetching seating plans: {str(e)}"
+        )
+    
+    try:
+        # Pre-fetch all rooms for all exams to reduce database queries
+        if not exams:
+            return SeatingPlanListResponse(plans=[], total=0, page=page, limit=limit)
+        
+        exam_ids_list = [exam.exam_id for exam in exams]
+        all_rooms = db.query(Room).filter(Room.exam_id.in_(exam_ids_list)).all()
+        
+        # Pre-fetch all seats for all rooms
+        room_ids_list = [room.room_id for room in all_rooms]
+        all_seats = []
+        if room_ids_list:
+            all_seats = db.query(Seat).filter(Seat.room_id.in_(room_ids_list)).all()
+        
+        # Organize rooms and seats by exam_id and room_id for quick lookup
+        rooms_by_exam = {}
+        for room in all_rooms:
+            if room.exam_id not in rooms_by_exam:
+                rooms_by_exam[room.exam_id] = []
+            rooms_by_exam[room.exam_id].append(room)
+        
+        seats_by_room = {}
+        for seat in all_seats:
+            if seat.room_id not in seats_by_room:
+                seats_by_room[seat.room_id] = []
+            seats_by_room[seat.room_id].append(seat)
+        
+        plans = []
+        today = date_class.today()
+        
+        for exam in exams:
+            try:
+                rooms = rooms_by_exam.get(exam.exam_id, [])
+                room_infos = []
+                total_seats = 0
+                
+                for room in rooms:
+                    seats = seats_by_room.get(room.room_id, [])
+                    seat_infos = []
+                    
+                    for seat in seats:
+                        seat_infos.append(SeatInfo(
+                            seat_number=seat.seat_number,
+                            assigned_student_id=str(seat.student_id) if seat.student_id else None
+                        ))
+                        total_seats += 1
+                    
+                    room_name = f"{room.block} {room.room_number}" if room.block else room.room_number
+                    room_infos.append(RoomInfo(
+                        room_id=str(room.room_id),
+                        room_name=room_name,
+                        capacity=room.total_seats or len(seats),
+                        seats=seat_infos
+                    ))
+                
+                # Determine status based on exam date
+                plan_status = "completed" if exam.exam_date and exam.exam_date < today else "processing"
+                
+                plans.append(SeatingPlanRead(
+                    id=str(exam.exam_id),
+                    filename=f"Seating Plan - {exam.course}",
+                    uploaded_by="System",  # Can be tracked if needed
+                    uploaded_at=exam.created_at,
+                    status=plan_status,
+                    total_seats=total_seats,
+                    rooms=room_infos
                 ))
-                total_seats += 1
-            
-            room_name = f"{room.block} {room.room_number}" if room.block else room.room_number
-            room_infos.append(RoomInfo(
-                room_id=str(room.room_id),
-                room_name=room_name,
-                capacity=room.total_seats or len(seats),
-                seats=seat_infos
-            ))
+            except Exception as e:
+                # Skip exams with errors but continue processing others
+                continue
         
-        # Determine status based on exam date
-        today = date_class.today()
-        plan_status = "completed" if exam.exam_date and exam.exam_date < today else "processing"
+        # Sort plans by uploaded_at (most recent first) if available, otherwise by exam date
+        plans.sort(key=lambda x: x.uploaded_at if x.uploaded_at else datetime.min.replace(tzinfo=None), reverse=True)
         
-        plans.append(SeatingPlanRead(
-            id=str(exam.exam_id),
-            filename=f"Seating Plan - {exam.course}",
-            uploaded_by="System",  # Can be tracked if needed
-            uploaded_at=exam.created_at,
-            status=plan_status,
-            total_seats=total_seats,
-            rooms=room_infos
-        ))
-    
-    # Sort plans by uploaded_at (most recent first) if available, otherwise by exam date
-    plans.sort(key=lambda x: x.uploaded_at if x.uploaded_at else datetime.min.replace(tzinfo=None), reverse=True)
-    
-    # Apply pagination
-    total = len(plans)
-    offset = (page - 1) * limit
-    paginated_plans = plans[offset:offset + limit]
-    
-    return SeatingPlanListResponse(
-        plans=paginated_plans,
-        total=total,
-        page=page,
-        limit=limit
-    )
+        # Apply pagination
+        total = len(plans)
+        offset = (page - 1) * limit
+        paginated_plans = plans[offset:offset + limit]
+        
+        return SeatingPlanListResponse(
+            plans=paginated_plans,
+            total=total,
+            page=page,
+            limit=limit
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing seating plans: {str(e)}"
+        )
 
 
 # -------------------------
