@@ -10,7 +10,41 @@ from database.db import get_db
 from database.models import Room, Seat, Exam, Student
 from database.auth import get_current_user
 
-router = APIRouter()
+router = APIRouter(prefix="/seating-plans", tags=["seating-plans"])
+
+
+# -------------------------
+# Helper Functions
+# -------------------------
+def is_valid_uuid_string(value) -> bool:
+    """Check if a value can be converted to a valid UUID"""
+    if value is None:
+        return False
+    try:
+        value_str = str(value).strip()
+        # Skip obvious non-UUID strings (route names, etc.)
+        if value_str.startswith(('seating-', 'room-', 'exam-', 'seat-', 'student-')):
+            return False
+        # Try to parse as UUID
+        UUID(value_str)
+        return True
+    except (ValueError, TypeError, AttributeError):
+        return False
+
+
+def safe_uuid_convert(value):
+    """Safely convert a value to UUID, returning None if invalid"""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, UUID):
+            return value
+        value_str = str(value).strip()
+        if is_valid_uuid_string(value_str):
+            return UUID(value_str)
+        return None
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 # -------------------------
@@ -74,7 +108,15 @@ def get_seating_plans(
     try:
         # First, get all unique exam IDs that have rooms
         room_exam_ids = db.query(Room.exam_id).distinct().all()
-        exam_ids_list = [exam_id[0] for exam_id in room_exam_ids if exam_id[0] is not None]
+        
+        # Filter and validate exam IDs - only keep valid UUIDs
+        exam_ids_list = []
+        for exam_id_tuple in room_exam_ids:
+            exam_id = exam_id_tuple[0]
+            if exam_id is not None:
+                validated_uuid = safe_uuid_convert(exam_id)
+                if validated_uuid is not None:
+                    exam_ids_list.append(validated_uuid)
         
         if not exam_ids_list:
             # No seating plans found
@@ -98,13 +140,22 @@ def get_seating_plans(
         
         # Get exams ordered by creation date (most recent first)
         exams = query.order_by(Exam.created_at.desc()).all()
+        print(exams)
     except (OperationalError, StatementError) as e:
         # Handle database transaction errors
         db.rollback()
         # Retry once after rollback
         try:
             room_exam_ids = db.query(Room.exam_id).distinct().all()
-            exam_ids_list = [exam_id[0] for exam_id in room_exam_ids if exam_id[0] is not None]
+            
+            # Filter and validate exam IDs - only keep valid UUIDs
+            exam_ids_list = []
+            for exam_id_tuple in room_exam_ids:
+                exam_id = exam_id_tuple[0]
+                if exam_id is not None:
+                    validated_uuid = safe_uuid_convert(exam_id)
+                    if validated_uuid is not None:
+                        exam_ids_list.append(validated_uuid)
             
             if not exam_ids_list:
                 return SeatingPlanListResponse(plans=[], total=0, page=page, limit=limit)
@@ -138,8 +189,13 @@ def get_seating_plans(
         exam_ids_list = [exam.exam_id for exam in exams]
         all_rooms = db.query(Room).filter(Room.exam_id.in_(exam_ids_list)).all()
         
-        # Pre-fetch all seats for all rooms
-        room_ids_list = [room.room_id for room in all_rooms]
+        # Pre-fetch all seats for all rooms - validate room_ids first
+        room_ids_list = []
+        for room in all_rooms:
+            validated_uuid = safe_uuid_convert(room.room_id)
+            if validated_uuid is not None:
+                room_ids_list.append(validated_uuid)
+        
         all_seats = []
         if room_ids_list:
             all_seats = db.query(Seat).filter(Seat.room_id.in_(room_ids_list)).all()
@@ -171,15 +227,43 @@ def get_seating_plans(
                     seat_infos = []
                     
                     for seat in seats:
+                        # Safely convert student_id to string
+                        student_id_str = None
+                        if seat.student_id:
+                            try:
+                                # Handle both UUID objects and strings
+                                if isinstance(seat.student_id, UUID):
+                                    student_id_str = str(seat.student_id)
+                                else:
+                                    # Try to validate and convert string to UUID first
+                                    UUID(str(seat.student_id))
+                                    student_id_str = str(seat.student_id)
+                            except (ValueError, TypeError, AttributeError):
+                                # Skip invalid UUIDs
+                                student_id_str = None
+                        
                         seat_infos.append(SeatInfo(
                             seat_number=seat.seat_number,
-                            assigned_student_id=str(seat.student_id) if seat.student_id else None
+                            assigned_student_id=student_id_str
                         ))
                         total_seats += 1
                     
                     room_name = f"{room.block} {room.room_number}" if room.block else room.room_number
+                    
+                    # Safely convert room_id to string
+                    room_id_str = None
+                    try:
+                        if isinstance(room.room_id, UUID):
+                            room_id_str = str(room.room_id)
+                        else:
+                            UUID(str(room.room_id))
+                            room_id_str = str(room.room_id)
+                    except (ValueError, TypeError, AttributeError):
+                        # Skip rooms with invalid UUIDs
+                        continue
+                    
                     room_infos.append(RoomInfo(
-                        room_id=str(room.room_id),
+                        room_id=room_id_str,
                         room_name=room_name,
                         capacity=room.total_seats or len(seats),
                         seats=seat_infos
@@ -188,8 +272,20 @@ def get_seating_plans(
                 # Determine status based on exam date
                 plan_status = "completed" if exam.exam_date and exam.exam_date < today else "processing"
                 
+                # Safely convert exam_id to string
+                exam_id_str = None
+                try:
+                    if isinstance(exam.exam_id, UUID):
+                        exam_id_str = str(exam.exam_id)
+                    else:
+                        UUID(str(exam.exam_id))
+                        exam_id_str = str(exam.exam_id)
+                except (ValueError, TypeError, AttributeError):
+                    # Skip exams with invalid UUIDs
+                    continue
+                
                 plans.append(SeatingPlanRead(
-                    id=str(exam.exam_id),
+                    id=exam_id_str,
                     filename=f"Seating Plan - {exam.course}",
                     uploaded_by="System",  # Can be tracked if needed
                     uploaded_at=exam.created_at,
@@ -250,20 +346,51 @@ def get_seating_plan_by_id(
         
         for seat in seats:
             student_name = None
+            student_id_str = None
+            
             if seat.student_id:
-                student = db.query(Student).filter(Student.student_id == seat.student_id).first()
-                student_name = student.name if student else None
+                try:
+                    # Handle both UUID objects and strings
+                    if isinstance(seat.student_id, UUID):
+                        student_id_str = str(seat.student_id)
+                        student = db.query(Student).filter(Student.student_id == seat.student_id).first()
+                        student_name = student.name if student else None
+                    else:
+                        # Try to validate and convert string to UUID first
+                        student_uuid = UUID(str(seat.student_id))
+                        student_id_str = str(student_uuid)
+                        student = db.query(Student).filter(Student.student_id == student_uuid).first()
+                        student_name = student.name if student else None
+                except (ValueError, TypeError, AttributeError):
+                    # Skip invalid UUIDs
+                    student_id_str = None
+                    student_name = None
             
             seat_infos.append(SeatInfo(
                 seat_number=seat.seat_number,
-                assigned_student_id=str(seat.student_id) if seat.student_id else None,
+                assigned_student_id=student_id_str,
                 assigned_student_name=student_name
             ))
             total_seats += 1
         
         room_name = f"{room.block} {room.room_number}" if room.block else room.room_number
+        
+        # Safely convert room_id to string
+        room_id_str = None
+        try:
+            if isinstance(room.room_id, UUID):
+                room_id_str = str(room.room_id)
+            else:
+                UUID(str(room.room_id))
+                room_id_str = str(room.room_id)
+        except (ValueError, TypeError, AttributeError):
+            raise HTTPException(
+                status_code=500,
+                detail="Invalid room_id format in database"
+            )
+        
         room_infos.append(RoomInfo(
-            room_id=str(room.room_id),
+            room_id=room_id_str,
             room_name=room_name,
             capacity=room.total_seats or len(seats),
             seats=seat_infos
@@ -271,8 +398,22 @@ def get_seating_plan_by_id(
     
     plan_status = "completed" if exam.exam_date < datetime.utcnow().date() else "processing"
     
+    # Safely convert exam_id to string
+    exam_id_str = None
+    try:
+        if isinstance(exam.exam_id, UUID):
+            exam_id_str = str(exam.exam_id)
+        else:
+            UUID(str(exam.exam_id))
+            exam_id_str = str(exam.exam_id)
+    except (ValueError, TypeError, AttributeError):
+        raise HTTPException(
+            status_code=500,
+            detail="Invalid exam_id format in database"
+        )
+    
     return SeatingPlanRead(
-        id=str(exam.exam_id),
+        id=exam_id_str,
         filename=f"Seating Plan - {exam.course}",
         uploaded_by="System",
         uploaded_at=exam.created_at,
@@ -303,9 +444,19 @@ def assign_student_to_seat(
     if not exam:
         raise HTTPException(status_code=404, detail="Seating plan not found")
     
+    # Validate and convert UUIDs
+    try:
+        room_uuid = UUID(assignment.room_id)
+        student_uuid = UUID(assignment.student_id)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid UUID format: {str(e)}"
+        )
+    
     # Verify room exists and belongs to this exam
     room = db.query(Room).filter(
-        Room.room_id == UUID(assignment.room_id),
+        Room.room_id == room_uuid,
         Room.exam_id == plan_id
     ).first()
     if not room:
@@ -313,26 +464,26 @@ def assign_student_to_seat(
     
     # Check if seat exists
     seat = db.query(Seat).filter(
-        Seat.room_id == UUID(assignment.room_id),
+        Seat.room_id == room_uuid,
         Seat.seat_number == assignment.seat_number
     ).first()
     
     if seat:
         # Update existing seat assignment
-        seat.student_id = UUID(assignment.student_id)
+        seat.student_id = student_uuid
     else:
         # Create new seat assignment
         seat = Seat(
-            room_id=UUID(assignment.room_id),
+            room_id=room_uuid,
             seat_number=assignment.seat_number,
-            student_id=UUID(assignment.student_id)
+            student_id=student_uuid
         )
         db.add(seat)
     
     db.commit()
     db.refresh(seat)
     
-    # Return updated seating plan
+    # Return updated seating plan (use plan_id string, not UUID)
     return get_seating_plan_by_id(plan_id, db, current_user)
 
 
