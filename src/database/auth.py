@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -38,7 +38,16 @@ google = oauth.register(
 )
 
 
-router = APIRouter(prefix="/auth", tags=["Auth"])
+router = APIRouter(
+    prefix="/auth",
+    tags=["Auth"],
+    responses={
+        200: {"description": "Success"},
+        400: {"description": "Bad Request"},
+        401: {"description": "Unauthorized"},
+        404: {"description": "Not Found"},
+    }
+)
 
 # -------------------------
 # Config
@@ -124,6 +133,14 @@ class SignupResponse(BaseModel):
     email: str
     name: str
 
+
+@router.options("/signup")
+async def signup_options(response: Response):
+    """Handle preflight request for signup"""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return {"message": "OK"}
 
 @router.post("/signup", response_model=SignupResponse)
 def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
@@ -283,6 +300,14 @@ def signup(user_data: SignupRequest, db: Session = Depends(get_db)):
         )
 
 
+@router.options("/login")
+async def login_options(response: Response):
+    """Handle preflight request for login"""
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return {"message": "OK"}
+
 @router.post("/login", response_model=TokenResponse)
 def login(credentials: LoginRequest, db: Session = Depends(get_db)):
     user = None
@@ -357,21 +382,23 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
     is_student_email = bool(re.match(r"i\d{2}\w{4}@(?:nu\.edu\.pk|isb\.nu\.edu\.pk)$", email, re.IGNORECASE))
 
     # ✅ 3. Look up user in database
-    student = db.query(Student).filter(Student.email == email).first()
-    admin = db.query(Admin).filter(Admin.email == email).first()
+    # Check in order: Investigator, Admin, Invigilator, Student
+    # This ensures investigators are identified correctly
     investigator = db.query(Investigator).filter(Investigator.email == email).first()
+    admin = db.query(Admin).filter(Admin.email == email).first()
     invigilator = db.query(Invigilator).filter(Invigilator.email == email).first()
+    student = db.query(Student).filter(Student.email == email).first()
 
-    user = admin or investigator or invigilator or student
+    user = investigator or admin or invigilator or student
     user_type = None
     user_id = None
 
     if user:
-        # ✅ Existing user
-        if admin:
-            user_type, user_id = "admin", str(admin.admin_id)
-        elif investigator:
+        # ✅ Existing user - Check investigator FIRST to avoid misidentification
+        if investigator:
             user_type, user_id = "investigator", str(investigator.investigator_id)
+        elif admin:
+            user_type, user_id = "admin", str(admin.admin_id)
         elif invigilator:
             user_type, user_id = "invigilator", str(invigilator.invigilator_id)
         elif student:
