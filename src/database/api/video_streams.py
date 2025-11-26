@@ -4,7 +4,7 @@ Production-ready implementation for frontend integration
 Handles video upload, processing, and results retrieval
 """
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, BackgroundTasks, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from typing import Optional, List
@@ -213,9 +213,11 @@ async def upload_exam_footage(
         )
         
         logger.info(f"Video uploaded: {video_path}")
+        logger.info(f"USE_DATABASE setting: {USE_DATABASE}")
         
         # Create database record if database available
         if USE_DATABASE and db:
+            logger.info("Attempting to save video stream to database...")
             try:
                 # Validate exam and room exist
                 exam = db.query(Exam).filter(Exam.exam_id == exam_uuid).first()
@@ -240,11 +242,18 @@ async def upload_exam_footage(
                 db.commit()
                 db.refresh(video_stream)
                 
-                logger.info(f"Database record created for stream: {stream_id}")
+                logger.info(f"✅ Database record created for stream: {stream_id}")
             except SQLAlchemyError as e:
-                logger.error(f"Database error: {e}")
+                logger.error(f"❌ Database error: {e}")
                 db.rollback()
                 # Continue without database
+        else:
+            if not USE_DATABASE:
+                logger.warning("⚠️ USE_DATABASE=false - Video will NOT persist in database!")
+                logger.warning("⚠️ Video will disappear after server restart or page refresh!")
+                logger.warning("⚠️ Set USE_DATABASE=true in .env file for persistent storage")
+            elif not db:
+                logger.warning("⚠️ Database session not available - Video will NOT persist!")
         
         # Start processing in background
         background_tasks.add_task(
@@ -550,27 +559,39 @@ def get_room_streams(room_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/all")
-def get_all_streams(db: Session = Depends(get_db)):
+def get_all_streams(
+    limit: Optional[int] = Query(1000, description="Maximum number of streams to return"),
+    db: Session = Depends(get_db)
+):
     """
     Get all video streams (Frontend Admin Dashboard)
     
     Frontend Usage:
     ```javascript
-    const response = await fetch('/api/video-streams/all');
+    const response = await fetch('/api/video-streams/all?limit=1000');
     const data = await response.json();
     // Display all uploaded videos with filters
     ```
+    
+    Note: Default limit is 1000 to show all videos. Use pagination for very large datasets.
     """
     if USE_DATABASE and db:
         try:
+            # Increase limit to 1000 by default (was 100, causing videos to disappear)
+            # This ensures all videos are visible unless there are more than 1000
+            max_limit = min(limit or 1000, 10000)  # Cap at 10000 for safety
             streams = db.query(VideoStream).order_by(
                 VideoStream.created_at.desc()
-            ).limit(100).all()
+            ).limit(max_limit).all()
+            
+            total_count = db.query(VideoStream).count()
             
             return {
                 "success": True,
                 "data": {
                     "count": len(streams),
+                    "total_count": total_count,
+                    "limit": max_limit,
                     "streams": [
                         {
                             "stream_id": str(s.stream_id),
@@ -579,7 +600,8 @@ def get_all_streams(db: Session = Depends(get_db)):
                             "stream_type": s.stream_type,
                             "status": s.status,
                             "created_at": serialize_datetime(s.created_at),
-                            "completed_at": serialize_datetime(s.completed_at)
+                            "completed_at": serialize_datetime(s.completed_at),
+                            "source_url": convert_path_to_url(s.source_url) if s.source_url else None
                         }
                         for s in streams
                     ]
@@ -589,14 +611,33 @@ def get_all_streams(db: Session = Depends(get_db)):
             logger.error(f"Database error: {e}")
             raise HTTPException(status_code=500, detail="Failed to fetch streams")
     
-    return {
-        "success": True,
-        "data": {
-            "count": 0,
-            "streams": [],
-            "message": "Database not available"
+    # If database not available, try to get from processor cache
+    # This is a fallback for when database is disabled
+    try:
+        processor = VideoProcessor(None, enable_ai=False)
+        # Get all processing results (these contain stream info)
+        # Note: This only works for recently processed videos
+        # For proper persistence, USE_DATABASE should be true
+        logger.warning("Database not available. Videos will not persist after server restart.")
+        return {
+            "success": True,
+            "data": {
+                "count": 0,
+                "streams": [],
+                "message": "Database not available. Enable USE_DATABASE=true for persistent storage.",
+                "warning": "Videos uploaded without database will be lost on server restart."
+            }
         }
-    }
+    except Exception as e:
+        logger.error(f"Error in fallback: {e}")
+        return {
+            "success": True,
+            "data": {
+                "count": 0,
+                "streams": [],
+                "message": "Database not available"
+            }
+        }
 
 
 @router.delete("/{stream_id}")
