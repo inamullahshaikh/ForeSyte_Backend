@@ -45,6 +45,9 @@ class PhoneFeedProcessor:
         self.save_frames = save_frames
         self.frame_dir = Path(frame_dir).resolve()
         self.frame_dir.mkdir(parents=True, exist_ok=True)
+        # Real-time tracking
+        self.live_frame_count = {}  # stream_id -> frame_count
+        self.live_stream_url = {}  # stream_id -> stream_url
         
     async def start_phone_feed_processing(
         self,
@@ -102,6 +105,8 @@ class PhoneFeedProcessor:
             nonlocal frame_count, activities, violations, saved_frames
             
             frame_count += 1
+            # Update live frame count for real-time status
+            self.live_frame_count[stream_id] = frame_count
             
             # Save frame to disk if enabled
             frame_path = None
@@ -158,6 +163,10 @@ class PhoneFeedProcessor:
             
             # You can add frame analysis here
             # For now, we'll just track frame count
+        
+        # Store stream URL for real-time access
+        self.live_stream_url[stream_id] = working_url
+        self.live_frame_count[stream_id] = 0
         
         # Process the stream using the working URL
         try:

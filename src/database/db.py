@@ -1,7 +1,7 @@
 # db.py
 import os
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, scoped_session
+from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 
 # Load environment variables from .env
@@ -26,14 +26,23 @@ engine = create_engine(
     pool_size=10,         # Connection pool size
     max_overflow=5,       # Extra connections beyond pool_size
     pool_pre_ping=True,   # Test connections before use
+    pool_recycle=3600,    # Recycle connections after 1 hour
 )
 
-SessionLocal = scoped_session(sessionmaker(autocommit=False, autoflush=False, bind=engine))
+# Use regular sessionmaker instead of scoped_session for FastAPI
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
+    """
+    Database session dependency for FastAPI.
+    Creates a new session for each request and ensures proper cleanup.
+    """
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

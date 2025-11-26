@@ -32,6 +32,7 @@ class PolygonDrawer:
         self.completed_polygons: Dict[str, List[List[int]]] = {}
         self.current_seat_id = ""
         self.drawing = False
+        self.seat_counter = 1  # Auto-incrementing seat ID counter
         
         # Window setup
         self.window_name = "Polygon Drawer - Click to add points, 'c' to complete, 's' to save, 'q' to quit"
@@ -48,14 +49,15 @@ class PolygonDrawer:
         print("="*70)
         print("\nControls:")
         print("  • LEFT CLICK: Add point to current polygon")
-        print("  • 'c' or ENTER: Complete current polygon and move to next seat")
+        print("  • 'c' or ENTER: Complete current polygon (auto-assigns seat_1, seat_2, ...)")
         print("  • 'u': Undo last point in current polygon")
         print("  • 'r': Reset current polygon")
         print("  • 'd': Delete last completed polygon")
         print("  • 's': Save all polygons to JSON file")
         print("  • 'q' or ESC: Quit (will prompt to save)")
         print("  • 'l': List all completed polygons")
-        print("\n" + "="*70)
+        print("\nNote: Seat IDs are auto-assigned. Edit JSON later to rename them.")
+        print("="*70)
     
     def mouse_callback(self, event, x, y, flags, param):
         """Handle mouse events"""
@@ -127,13 +129,9 @@ class PolygonDrawer:
             print("⚠ Warning: Polygon must have at least 3 points!")
             return
         
-        # Get seat ID
-        if not self.current_seat_id:
-            seat_id = input("\nEnter seat ID (e.g., 'seat_c1r1'): ").strip()
-            if not seat_id:
-                print("⚠ No seat ID provided. Skipping polygon.")
-                return
-            self.current_seat_id = seat_id
+        # Auto-generate seat ID (sequential: 1, 2, 3, ...)
+        seat_id = f"seat_{self.seat_counter}"
+        self.seat_counter += 1
         
         # Convert to list of lists format
         polygon_list = [[int(p[0]), int(p[1])] for p in self.current_polygon]
@@ -143,9 +141,9 @@ class PolygonDrawer:
             polygon_list.append(polygon_list[0])
         
         # Save polygon
-        self.completed_polygons[self.current_seat_id] = polygon_list
+        self.completed_polygons[seat_id] = polygon_list
         
-        print(f"✓ Completed polygon for {self.current_seat_id} with {len(polygon_list)} points")
+        print(f"✓ Completed polygon {seat_id} with {len(polygon_list)} points")
         
         # Reset for next polygon
         self.current_polygon = []
@@ -227,7 +225,8 @@ class PolygonDrawer:
         self.update_display()
         
         print("\nReady! Start clicking on the image to draw polygons.")
-        print("Enter seat ID when you complete each polygon.\n")
+        print("Seat IDs will be auto-assigned sequentially (seat_1, seat_2, seat_3, ...)")
+        print("You can edit the JSON file later to rename them.\n")
         
         while True:
             key = cv2.waitKey(1) & 0xFF

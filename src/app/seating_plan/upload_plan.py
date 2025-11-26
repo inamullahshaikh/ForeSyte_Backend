@@ -277,18 +277,73 @@ async def upload_seating_plan(
         with open(SEAT_MAP_PATH) as f:
             seat_map = json.load(f)["seats"]
 
-        def find_student(seat_id):
-            seat_id = seat_id.replace("seat_", "").upper()
-            for s in selected_exam["students"]:
-                if s["seat_no"].upper() == seat_id:
-                    return s
-            return None
+        # Find maximum column from seating plan
+        max_column = 0
+        for student in selected_exam["students"]:
+            seat_no = student["seat_no"].upper()
+            # Extract column number from formats like C1R1, C2R3, etc.
+            col_match = re.search(r'C(\d+)', seat_no)
+            if col_match:
+                col_num = int(col_match.group(1))
+                max_column = max(max_column, col_num)
 
+        # Create column mapping based on max column
+        def get_column_mapping(max_col):
+            """Create mapping from input columns to seat_map columns"""
+            if max_col == 6:
+                # Map: c1→c1, c2→c3, c3→c5, c4→c6, c5→c8, c6→c10
+                return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
+            elif max_col == 5:
+                # Map: c1→c1, c2→c4, c3→c6, c4→c8, c5→c10
+                return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
+            else:
+                # Default: map 1:1 for other cases
+                return {i: i for i in range(1, max_col + 1)}
+
+        column_mapping = get_column_mapping(max_column)
+        print(f"[DEBUG] Max column: {max_column}, Mapping: {column_mapping}")
+
+        # Create a mapping from input seat numbers to seat_map IDs
+        def map_seat_to_seat_map(seat_no):
+            """Map input seat number (e.g., C1R1) to seat_map ID (e.g., seat_c1r1)"""
+            seat_no = seat_no.upper()
+            # Extract column and row
+            match = re.search(r'C(\d+)R(\d+)', seat_no)
+            if not match:
+                return None
+            
+            input_col = int(match.group(1))
+            row = int(match.group(2))
+            
+            # Map to seat_map column
+            mapped_col = column_mapping.get(input_col)
+            if not mapped_col:
+                return None
+            
+            return f"seat_c{mapped_col}r{row}"
+
+        # Build a set of filled seat_map IDs (seats with students)
+        filled_seats = set()
+        student_seat_map = {}  # Map seat_map_id to student data
+        
+        for student in selected_exam["students"]:
+            seat_map_id = map_seat_to_seat_map(student["seat_no"])
+            if seat_map_id:
+                filled_seats.add(seat_map_id)
+                student_seat_map[seat_map_id] = student
+
+        print(f"[DEBUG] Filled seats: {len(filled_seats)} out of {len(seat_map)} total seats")
+
+        # Only draw polygons for filled seats
         for seat_id, points in seat_map.items():
+            # Skip if seat is not filled
+            if seat_id not in filled_seats:
+                continue
+            
             pts = np.array([tuple(p) for p in points], np.int32)
             cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
 
-            student = find_student(seat_id)
+            student = student_seat_map.get(seat_id)
             text = f"{student['name']} ({student['roll_no']})" if student else f"[{seat_id}]"
 
             M = cv2.moments(pts)

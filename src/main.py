@@ -28,6 +28,8 @@ from database.api.notifications import router as notifications_router
 from database.auth import router as auth_router
 from app.seating_plan.upload_plan import router as upload_plan_router
 from database.api.video_streams import router as video_stream_router
+from database.api.phone_monitoring import router as phone_monitoring_router
+from database.api.stream_proxy import router as stream_proxy_router
 # -------------------------
 # Logging Configuration
 # -------------------------
@@ -145,6 +147,8 @@ app.include_router(notifications_router)
 app.include_router(auth_router)
 app.include_router(upload_plan_router)
 app.include_router(video_stream_router)
+app.include_router(phone_monitoring_router)
+app.include_router(stream_proxy_router)
 # -------------------------
 # Root Endpoint
 # -------------------------
