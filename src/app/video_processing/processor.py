@@ -44,6 +44,11 @@ class VideoProcessor:
             self.behavior_detector = None
         self.db_session = db_session
         self.processing_results = {}
+        self.progress_callback = None  # Callback to update progress during processing
+        
+    def set_progress_callback(self, callback):
+        """Set callback function to update progress during frame extraction"""
+        self.progress_callback = callback
         
     async def process_video_stream(self, stream_id: str, source: str, 
                                    stream_type: str, exam_id: str,
@@ -235,7 +240,8 @@ class VideoProcessor:
             "stream_result": stream_result,
             "activities_logged": activities,
             "violations_detected": violations,
-            "total_frames_processed": frame_count
+            "total_frames_processed": len(frames_info),
+            "total_frames_in_video": extraction_result.get('total_frames', len(frames_info))
         }
     
     async def _process_recorded_footage(self, stream_id: str, video_path: str,
@@ -265,8 +271,15 @@ class VideoProcessor:
         def progress_callback(processed, total):
             progress = (processed / total * 100) if total > 0 else 0
             logger.info(f"Progress: {progress:.1f}% ({processed}/{total} frames)")
+            # Call external progress callback if set (for database updates)
+            if self.progress_callback:
+                try:
+                    self.progress_callback(processed, total)
+                except Exception as e:
+                    logger.warning(f"Progress callback error: {e}")
         
         # Step 3: Process video frames in batch mode
+        # Pass progress_callback to stream_handler which will call it during frame extraction
         extraction_result = self.stream_handler.process_recorded_video(
             video_path, stream_id, progress_callback
         )
@@ -278,7 +291,8 @@ class VideoProcessor:
             }
         
         frames_info = extraction_result['frames_info']
-        logger.info(f"Extracted {len(frames_info)} frames for analysis")
+        total_frames_in_video = extraction_result.get('total_frames', len(frames_info))
+        logger.info(f"Extracted {len(frames_info)} frames for analysis (out of {total_frames_in_video} total frames in video)")
         
         # Step 4: AI engine processes each frame (DISABLED FOR INPUT TESTING)
         for idx, frame_info in enumerate(frames_info):
@@ -380,10 +394,13 @@ class VideoProcessor:
                 logger.info(f"Analyzed {idx + 1}/{len(frames_info)} frames")
         
         return {
+            "success": True,
             "activities_logged": activities,
             "violations_detected": violations,
             "frame_analysis": frame_analyses,
             "total_frames_analyzed": len(frames_info),
+            "total_frames_processed": len(frames_info),
+            "total_frames_in_video": extraction_result.get('total_frames', len(frames_info)),
             "extraction_result": extraction_result
         }
     

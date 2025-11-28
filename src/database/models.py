@@ -94,6 +94,7 @@ class Room(Base):
     block = Column(String)
     total_seats = Column(Integer)
     camera_id = Column(String)
+    stream_url = Column(Text)  # IP Webcam stream URL (e.g., http://192.168.1.100:8080/video.mjpeg)
     exam_id = Column(UUID(as_uuid=True), ForeignKey("exams.exam_id"))
 
     exam = relationship("Exam", back_populates="rooms")

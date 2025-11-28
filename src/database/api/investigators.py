@@ -48,6 +48,10 @@ class TokenResponse(BaseModel):
     user_type: str
     id: UUID
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
 
 # -------------------------
 # CRUD Routes
@@ -168,10 +172,8 @@ def login_investigator(login: InvestigatorLogin, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     access_token = create_access_token(
-        data={
-            "id": str(investigator.investigator_id),
-            "user_type": "investigator"
-        },
+        user_id=str(investigator.investigator_id),
+        user_type="investigator",
         expires_delta=timedelta(hours=1)
     )
 
@@ -181,3 +183,40 @@ def login_investigator(login: InvestigatorLogin, db: Session = Depends(get_db)):
         "user_type": "investigator",
         "id": investigator.investigator_id
     }
+
+
+# -------------------------
+# CHANGE PASSWORD
+# -------------------------
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+def change_password(
+    password_data: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Change password for the current investigator.
+    Requires current password verification.
+    """
+    if current_user["user_type"] != "investigator":
+        raise HTTPException(status_code=403, detail="Only investigators can change their password")
+    
+    user_id = UUID(current_user["id"])
+    investigator = db.query(Investigator).filter(Investigator.investigator_id == user_id).first()
+    
+    if not investigator:
+        raise HTTPException(status_code=404, detail="Investigator not found")
+    
+    # Verify current password
+    if not hasattr(investigator, "password_hash") or not verify_password(password_data.current_password, investigator.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    
+    # Validate new password length
+    if len(password_data.new_password) < 8:
+        raise HTTPException(status_code=400, detail="New password must be at least 8 characters long")
+    
+    # Update password
+    investigator.password_hash = hash_password(password_data.new_password)
+    db.commit()
+    
+    return {"message": "Password changed successfully"}
