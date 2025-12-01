@@ -29,8 +29,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-<<<<<<< HEAD
 # PyInstaller
 *.manifest
 *.spec
