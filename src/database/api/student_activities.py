@@ -169,6 +169,10 @@ def get_activities_by_student_id(
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
+    """
+    Get all activities for a specific student.
+    Returns empty list if no activities found (instead of 404).
+    """
     user_type = current_user.get("user_type")
     user_id = current_user.get("id")
 
@@ -178,9 +182,12 @@ def get_activities_by_student_id(
     if user_type == "student" and str(user_id) != str(student_id):
         raise HTTPException(status_code=403, detail="Students can only view their own activities")
 
+    # Verify student exists
+    student = db.query(Student).filter(Student.student_id == student_id).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
     activities = db.query(StudentActivity).filter(StudentActivity.student_id == student_id).all()
 
-    if not activities:
-        raise HTTPException(status_code=404, detail="No activities found for this student")
-
+    # Return empty list instead of 404 if no activities found
     return activities
