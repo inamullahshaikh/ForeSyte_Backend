@@ -68,11 +68,19 @@ def get_monitoring_feeds(
         # Generate room name
         room_name = f"{room.block} {room.room_number}" if room.block else room.room_number
 
+        # Use actual stream_url from database (IP Webcam URL) or generate placeholder
+        stream_url = room.stream_url
+        if not stream_url and room.camera_id:
+            # If no stream_url but camera_id exists, could be IP Webcam
+            # Format: http://IP:PORT/video.mjpeg
+            # For now, return None - admin should set stream_url via API
+            stream_url = None
+        
         feeds.append(CameraFeed(
             camera_id=room.camera_id or f"CAM-{room.room_id}",
             room_id=str(room.room_id),
             room_name=room_name,
-            stream_url=f"rtsp://example.com/stream/{room.camera_id}" if room.camera_id else None,
+            stream_url=stream_url,  # Use actual IP Webcam URL from database
             status=status,
             students_monitored=students_count
         ))

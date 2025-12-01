@@ -92,7 +92,7 @@ class VideoStreamHandler:
             }
     
     def extract_frames(self, video_source: str, frame_rate: int = 1, 
-                      job_id: str = None) -> list:
+                      job_id: str = None, progress_callback=None) -> list:
         """
         Extracts frames from video for analysis.
         Used in Step 3 of UC-07: Process video frames
@@ -122,6 +122,12 @@ class VideoStreamHandler:
         frame_number = 0
         extracted_count = 0
         
+        # Get total frame count for progress tracking
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        # Calculate expected number of extracted frames
+        expected_extracted_frames = (total_frames // frame_rate) + (1 if total_frames % frame_rate > 0 else 0)
+        logger.info(f"Video has {total_frames} total frames, extracting every {frame_rate} frames (expected: ~{expected_extracted_frames} frames)")
+        
         try:
             while True:
                 ret, frame = cap.read()
@@ -147,8 +153,16 @@ class VideoStreamHandler:
                     
                     extracted_count += 1
                     
+                    # Call progress callback if provided (every frame or at milestones)
+                    if progress_callback:
+                        try:
+                            # Use expected extracted frames for progress, not total video frames
+                            progress_callback(extracted_count, expected_extracted_frames)
+                        except Exception as e:
+                            logger.warning(f"Progress callback error: {e}")
+                    
                     if extracted_count % 100 == 0:
-                        logger.info(f"Extracted {extracted_count} frames from job {job_id}")
+                        logger.info(f"Extracted {extracted_count} frames from job {job_id} (out of ~{total_frames // frame_rate} expected)")
                 
                 frame_number += 1
                 
@@ -234,7 +248,7 @@ class VideoStreamHandler:
         Args:
             video_path: Path to uploaded video file
             job_id: Processing job identifier
-            progress_callback: Function to update progress
+            progress_callback: Function to update progress (called during extraction)
             
         Returns:
             Processing results
@@ -262,12 +276,30 @@ class VideoStreamHandler:
         logger.info(f"Total frames: {total_frames}, FPS: {fps}")
         
         # Extract frames (every 30 frames = ~1 per second for 30fps video)
+        # But reduce rate for shorter videos to get more frames
         frame_extraction_rate = max(1, int(fps))
-        frames = self.extract_frames(video_path, frame_extraction_rate, job_id)
+        # For videos with fewer frames, extract more frequently
+        if total_frames < 1000:
+            frame_extraction_rate = max(1, int(fps // 2))  # Extract every 15 frames for shorter videos
         
-        # Update progress if callback provided
+        # Calculate expected extracted frames
+        expected_extracted = (total_frames // frame_extraction_rate) + (1 if total_frames % frame_extraction_rate > 0 else 0)
+        
+        # Notify callback of expected extracted frames before extraction starts
         if progress_callback:
-            progress_callback(len(frames), total_frames)
+            try:
+                progress_callback(0, expected_extracted)
+            except Exception as e:
+                logger.warning(f"Progress callback error at start: {e}")
+        
+        frames = self.extract_frames(video_path, frame_extraction_rate, job_id, progress_callback)
+        
+        # Final progress update
+        if progress_callback:
+            try:
+                progress_callback(len(frames), expected_extracted)
+            except Exception as e:
+                logger.warning(f"Progress callback error at end: {e}")
         
         return {
             "success": True,

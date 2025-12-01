@@ -114,10 +114,15 @@ def validate_video_file(filename: str, file_size: int) -> tuple[bool, str]:
 
 
 def serialize_datetime(dt):
-    """Convert datetime to ISO string for JSON"""
+    """Convert datetime to ISO string for JSON with timezone"""
     if dt is None:
         return None
     if isinstance(dt, datetime):
+        # Ensure UTC timezone is included in ISO format
+        if dt.tzinfo is None:
+            # If no timezone, assume UTC (from datetime.utcnow())
+            from datetime import timezone
+            dt = dt.replace(tzinfo=timezone.utc)
         return dt.isoformat()
     return str(dt)
 
@@ -760,6 +765,27 @@ async def process_video_background(
         processor = VideoProcessor(db, enable_ai=False)
         seat_mapping = {}  # TODO: Load from seating plan
         
+        # Create progress callback to update ProcessingJob during extraction
+        def update_progress_callback(processed: int, total: int):
+            """Update ProcessingJob with frame extraction progress"""
+            if db and use_database:
+                try:
+                    job = db.query(ProcessingJob).filter(
+                        ProcessingJob.stream_id == UUID(stream_id)
+                    ).first()
+                    if job:
+                        job.total_frames = total
+                        job.processed_frames = processed
+                        job.progress = (processed / total * 100) if total > 0 else 0.0
+                        db.commit()
+                        logger.info(f"Updated progress: {processed}/{total} frames ({job.progress:.1f}%)")
+                except Exception as e:
+                    logger.warning(f"Failed to update progress: {e}")
+                    db.rollback()
+        
+        # Pass progress callback to processor
+        processor.set_progress_callback(update_progress_callback)
+        
         results = await processor.process_video_stream(
             stream_id, source, stream_type, exam_id, room_id, seat_mapping
         )
@@ -775,7 +801,17 @@ async def process_video_background(
                     if job:
                         job.status = "completed"
                         job.progress = 100.0
-                        job.processed_frames = results.get('total_frames_processed', 0)
+                        # Use the actual extracted frames count
+                        extracted_frames = results.get('total_frames_processed', 0)
+                        # Get expected extracted frames from extraction result
+                        extraction_result = results.get('extraction_result', {})
+                        expected_extracted = extraction_result.get('extracted_frames', extracted_frames)
+                        total_video_frames = extraction_result.get('total_frames', extracted_frames)
+                        
+                        # Store expected extracted frames as total_frames (for display)
+                        if job.total_frames is None or job.total_frames == 0:
+                            job.total_frames = expected_extracted if expected_extracted > 0 else extracted_frames
+                        job.processed_frames = extracted_frames
                         job.detected_activities = len(results.get('activities_logged', []))
                         job.detected_violations = len(results.get('violations_detected', []))
                         job.completed_at = datetime.utcnow()

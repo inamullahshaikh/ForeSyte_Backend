@@ -18,6 +18,7 @@ class RoomCreate(BaseModel):
     block: Optional[str] = None
     total_seats: Optional[int] = None
     camera_id: Optional[str] = None
+    stream_url: Optional[str] = None  # IP Webcam URL (e.g., http://192.168.1.100:8080/video.mjpeg)
     exam_id: Optional[UUID] = None
 
 
@@ -27,6 +28,7 @@ class RoomRead(BaseModel):
     block: Optional[str]
     total_seats: Optional[int]
     camera_id: Optional[str]
+    stream_url: Optional[str]  # IP Webcam stream URL
     exam_id: Optional[UUID]
 
     model_config = {
@@ -39,6 +41,7 @@ class RoomUpdate(BaseModel):
     block: Optional[str] = None
     total_seats: Optional[int] = None
     camera_id: Optional[str] = None
+    stream_url: Optional[str] = None  # IP Webcam URL (e.g., http://192.168.1.100:8080/video.mjpeg)
     exam_id: Optional[UUID] = None
 
 
