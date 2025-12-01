@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+:root {
+  /* Primary Theme Colors */
+  --color-primary: #c6b3ff; /* Lavender from logo */
+  --color-accent: #e9ff6e; /* Lime from logo */
+  --color-secondary: #6e5ae6; /* Darker lavender */
+
+  /* Backgrounds & Surfaces */
+  --color-bg: #f9f9fb;
+  --color-surface: #ffffff;
+
+  /* Sidebar Colors */
+  --color-sidebar-bg: #1e1f25; /* Dark gray with slight purple tint */
+  --color-sidebar-hover: #2a2b33; /* Lighter gray on hover */
+  --color-sidebar-active: #c6b3ff; /* Highlight active menu item */
+  --color-sidebar-text: #ffffff; /* Default sidebar text */
+  --color-sidebar-muted: #b0b0b0; /* Secondary sidebar text */
+
+  /* Text & Neutral Colors */
+  --color-dark: #1a1a1a;
+  --color-gray: #8e8e93;
+
+  /* Status Colors */
+  --color-success: #4ade80;
+  --color-warning: #facc15;
+  --color-danger: #f87171;
+  --color-info: #38bdf8;
+
+  /* Shadows & Radius */
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 6px 18px rgba(0, 0, 0, 0.12);
+  --radius-md: 12px;
+  --radius-lg: 18px;
+
+  /* Typography */
+  --font-family: "Montserrat", sans-serif;
+  --font-size-base: 16px;
+  --font-size-heading: 22px;
+  --font-size-small: 14px;
+
+  /* Transitions */
+  --transition: all 0.3s ease-in-out;
+}
+
+/* Custom Animations for Upload Loading */
+@keyframes progress {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 70%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-progress {
+  animation: progress 2s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* Custom Animations for Upload Loading */
+@keyframes progress {
+  0% {
+    width: 0%;
+  }
+  50% {
+    width: 70%;
+  }
+  100% {
+    width: 100%;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.animate-progress {
+  animation: progress 2s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  animation: shimmer 1.5s ease-in-out infinite;
+}

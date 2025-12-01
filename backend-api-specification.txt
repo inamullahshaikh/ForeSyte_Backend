@@ -1,0 +1,593 @@
+================================================================================
+FORESYTE BACKEND API SPECIFICATION
+================================================================================
+
+This document provides a comprehensive specification for implementing the 
+ForeSyte backend API. Use this as a guide to build all required endpoints.
+
+BASE URL: http://127.0.0.1:8000
+API VERSION: v1
+AUTHENTICATION: JWT Bearer Token (stored in sessionStorage as "token")
+
+================================================================================
+AUTHENTICATION & AUTHORIZATION
+================================================================================
+
+1. USER REGISTRATION (SIGNUP)
+   POST /auth/signup
+   Body:
+   {
+     "name": "string",
+     "email": "string",
+     "password": "string",
+     "role": "student" | "admin" | "investigator" | "invigilator"
+   }
+   Response:
+   {
+     "access_token": "string",
+     "user_type": "string",
+     "id": "string",
+     "email": "string",
+     "name": "string"
+   }
+
+2. USER LOGIN
+   POST /auth/login
+   Body:
+   {
+     "email": "string",
+     "password": "string"
+   }
+   Response:
+   {
+     "access_token": "string",
+     "user_type": "student" | "admin" | "investigator" | "invigilator",
+     "id": "string",
+     "email": "string",
+     "name": "string"
+   }
+
+3. GOOGLE OAUTH LOGIN
+   GET /auth/google
+   Redirects to Google OAuth, then redirects back to /login-success with tokens
+
+4. ROLE SELECTION (After Google OAuth)
+   POST /auth/register-role
+   Body:
+   {
+     "email": "string",
+     "name": "string",
+     "role": "admin" | "invigilator" | "investigator"
+   }
+   Response:
+   {
+     "access_token": "string",
+     "user_type": "string",
+     "id": "string"
+   }
+
+5. TOKEN REFRESH
+   POST /auth/refresh
+   Headers: Authorization: Bearer {refresh_token}
+   Response:
+   {
+     "access_token": "string"
+   }
+
+6. LOGOUT
+   POST /auth/logout
+   Headers: Authorization: Bearer {token}
+   Response: { "message": "Logged out successfully" }
+
+================================================================================
+USER MANAGEMENT
+================================================================================
+
+7. GET CURRENT USER PROFILE
+   GET /users/me
+   Headers: Authorization: Bearer {token}
+   Response:
+   {
+     "id": "string",
+     "name": "string",
+     "email": "string",
+     "user_type": "string",
+     "created_at": "datetime",
+     "last_login": "datetime"
+   }
+
+8. UPDATE USER PROFILE
+   PUT /users/me
+   Headers: Authorization: Bearer {token}
+   Body:
+   {
+     "name": "string" (optional),
+     "email": "string" (optional)
+   }
+   Response: Updated user object
+
+9. GET ALL USERS (Admin only)
+   GET /users
+   Headers: Authorization: Bearer {token}
+   Query Params: ?role=student&page=1&limit=20
+   Response:
+   {
+     "users": [...],
+     "total": number,
+     "page": number,
+     "limit": number
+   }
+
+10. GET USER BY ID
+    GET /users/{user_id}
+    Headers: Authorization: Bearer {token}
+    Response: User object
+
+11. UPDATE USER (Admin only)
+    PUT /users/{user_id}
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "name": "string" (optional),
+      "email": "string" (optional),
+      "user_type": "string" (optional),
+      "status": "active" | "suspended" | "inactive" (optional)
+    }
+    Response: Updated user object
+
+12. DELETE USER (Admin only)
+    DELETE /users/{user_id}
+    Headers: Authorization: Bearer {token}
+    Response: { "message": "User deleted successfully" }
+
+================================================================================
+SEATING PLAN MANAGEMENT
+================================================================================
+
+13. UPLOAD SEATING PLAN (PDF)
+    POST /seating-plans/upload
+    Headers: 
+      Authorization: Bearer {token}
+      Content-Type: multipart/form-data
+    Body: FormData with "file" field (PDF)
+    Response:
+    {
+      "id": "string",
+      "filename": "string",
+      "uploaded_by": "string",
+      "uploaded_at": "datetime",
+      "status": "processing" | "completed" | "failed",
+      "total_seats": number,
+      "rooms": [...]
+    }
+
+14. GET ALL SEATING PLANS
+    GET /seating-plans
+    Headers: Authorization: Bearer {token}
+    Query Params: ?page=1&limit=20&status=completed
+    Response:
+    {
+      "plans": [...],
+      "total": number,
+      "page": number,
+      "limit": number
+    }
+
+15. GET SEATING PLAN BY ID
+    GET /seating-plans/{plan_id}
+    Headers: Authorization: Bearer {token}
+    Response:
+    {
+      "id": "string",
+      "filename": "string",
+      "uploaded_by": "string",
+      "uploaded_at": "datetime",
+      "status": "string",
+      "total_seats": number,
+      "rooms": [
+        {
+          "room_id": "string",
+          "room_name": "string",
+          "capacity": number,
+          "seats": [
+            {
+              "seat_number": "string",
+              "row": "string",
+              "column": "string",
+              "assigned_student_id": "string" (optional)
+            }
+          ]
+        }
+      ]
+    }
+
+16. ASSIGN STUDENT TO SEAT
+    POST /seating-plans/{plan_id}/assign
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "student_id": "string",
+      "room_id": "string",
+      "seat_number": "string"
+    }
+    Response: Updated seating plan
+
+17. DELETE SEATING PLAN
+    DELETE /seating-plans/{plan_id}
+    Headers: Authorization: Bearer {token}
+    Response: { "message": "Seating plan deleted successfully" }
+
+================================================================================
+EXAM MANAGEMENT
+================================================================================
+
+18. CREATE EXAM
+    POST /exams
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "name": "string",
+      "course_code": "string",
+      "instructor_id": "string",
+      "scheduled_date": "datetime",
+      "duration_minutes": number,
+      "seating_plan_id": "string",
+      "description": "string" (optional)
+    }
+    Response: Created exam object
+
+19. GET ALL EXAMS
+    GET /exams
+    Headers: Authorization: Bearer {token}
+    Query Params: ?status=active&page=1&limit=20
+    Response:
+    {
+      "exams": [...],
+      "total": number,
+      "page": number,
+      "limit": number
+    }
+
+20. GET EXAM BY ID
+    GET /exams/{exam_id}
+    Headers: Authorization: Bearer {token}
+    Response: Exam object with details
+
+21. UPDATE EXAM
+    PUT /exams/{exam_id}
+    Headers: Authorization: Bearer {token}
+    Body: Partial exam object
+    Response: Updated exam object
+
+22. DELETE EXAM
+    DELETE /exams/{exam_id}
+    Headers: Authorization: Bearer {token}
+    Response: { "message": "Exam deleted successfully" }
+
+23. GET ACTIVE EXAMS
+    GET /exams/active
+    Headers: Authorization: Bearer {token}
+    Response: Array of active exam objects
+
+================================================================================
+INCIDENT MANAGEMENT
+================================================================================
+
+24. GET ALL INCIDENTS
+    GET /incidents
+    Headers: Authorization: Bearer {token}
+    Query Params: ?severity=high&status=investigating&page=1&limit=20
+    Response:
+    {
+      "incidents": [
+        {
+          "id": "string",
+          "camera_id": "string",
+          "student_id": "string",
+          "student_name": "string",
+          "exam_id": "string",
+          "exam_name": "string",
+          "instructor": "string",
+          "type": "string",
+          "severity": "low" | "medium" | "high" | "critical",
+          "timestamp": "datetime",
+          "status": "investigating" | "resolved" | "dismissed",
+          "confidence": number (0-100),
+          "video_url": "string" (optional),
+          "description": "string" (optional)
+        }
+      ],
+      "total": number,
+      "page": number,
+      "limit": number
+    }
+
+25. GET INCIDENT BY ID
+    GET /incidents/{incident_id}
+    Headers: Authorization: Bearer {token}
+    Response: Incident object with full details
+
+26. UPDATE INCIDENT STATUS
+    PUT /incidents/{incident_id}/status
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "status": "investigating" | "resolved" | "dismissed",
+      "notes": "string" (optional)
+    }
+    Response: Updated incident object
+
+27. CREATE INCIDENT (System generated)
+    POST /incidents
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "camera_id": "string",
+      "student_id": "string",
+      "exam_id": "string",
+      "type": "string",
+      "severity": "string",
+      "confidence": number,
+      "video_url": "string" (optional),
+      "description": "string" (optional)
+    }
+    Response: Created incident object
+
+28. GET INCIDENT VIDEO
+    GET /incidents/{incident_id}/video
+    Headers: Authorization: Bearer {token}
+    Response: Video file or streaming URL
+
+================================================================================
+DASHBOARD & ANALYTICS
+================================================================================
+
+29. GET DASHBOARD STATS (Admin/Investigator)
+    GET /dashboard/stats
+    Headers: Authorization: Bearer {token}
+    Query Params: ?period=today|week|month
+    Response:
+    {
+      "active_exams": number,
+      "incidents_detected": number,
+      "students_monitored": number,
+      "avg_exam_duration": number (minutes),
+      "incidents_trend": "+12%" | "-23%",
+      "students_trend": "+8%",
+      "exams_trend": "+12%"
+    }
+
+30. GET ACTIVITY CHART DATA
+    GET /dashboard/activity
+    Headers: Authorization: Bearer {token}
+    Query Params: ?period=today|week|month
+    Response:
+    {
+      "data": [
+        {
+          "time": "string",
+          "incidents": number,
+          "exams": number
+        }
+      ]
+    }
+
+31. GET RECENT INCIDENTS
+    GET /dashboard/recent-incidents
+    Headers: Authorization: Bearer {token}
+    Query Params: ?limit=5
+    Response: Array of recent incident objects
+
+32. GET STUDENT DASHBOARD STATS
+    GET /dashboard/student
+    Headers: Authorization: Bearer {token}
+    Response:
+    {
+      "disciplinary_cases": number,
+      "cheating_flags": number,
+      "recent_activities": [
+        {
+          "id": "string",
+          "type": "string",
+          "description": "string",
+          "timestamp": "datetime",
+          "severity": "string",
+          "exam_name": "string"
+        }
+      ]
+    }
+
+================================================================================
+MONITORING & LIVE FEED
+================================================================================
+
+33. GET LIVE MONITORING FEEDS
+    GET /monitoring/feeds
+    Headers: Authorization: Bearer {token}
+    Query Params: ?exam_id={exam_id}
+    Response:
+    {
+      "feeds": [
+        {
+          "camera_id": "string",
+          "room_id": "string",
+          "room_name": "string",
+          "stream_url": "string",
+          "status": "active" | "inactive",
+          "students_monitored": number
+        }
+      ]
+    }
+
+34. GET CAMERA STATUS
+    GET /monitoring/cameras/{camera_id}/status
+    Headers: Authorization: Bearer {token}
+    Response:
+    {
+      "camera_id": "string",
+      "status": "active" | "inactive" | "error",
+      "last_heartbeat": "datetime",
+      "students_detected": number
+    }
+
+================================================================================
+REPORTS
+================================================================================
+
+35. GENERATE INCIDENT REPORT
+    POST /reports/incidents
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "incident_ids": ["string"],
+      "format": "pdf" | "csv" | "json",
+      "include_video_links": boolean
+    }
+    Response: File download or URL to generated report
+
+36. GENERATE EXAM REPORT
+    POST /reports/exams/{exam_id}
+    Headers: Authorization: Bearer {token}
+    Body:
+    {
+      "format": "pdf" | "csv" | "json",
+      "include_statistics": boolean
+    }
+    Response: File download or URL to generated report
+
+37. GET REPORT HISTORY
+    GET /reports
+    Headers: Authorization: Bearer {token}
+    Query Params: ?page=1&limit=20
+    Response:
+    {
+      "reports": [...],
+      "total": number
+    }
+
+================================================================================
+STUDENT PORTAL
+================================================================================
+
+38. UPLOAD STUDENT DOCUMENT
+    POST /students/documents/upload
+    Headers: 
+      Authorization: Bearer {token}
+      Content-Type: multipart/form-data
+    Body: FormData with "file" field
+    Response:
+    {
+      "id": "string",
+      "filename": "string",
+      "uploaded_at": "datetime",
+      "status": "pending" | "verified" | "rejected"
+    }
+
+39. GET STUDENT DOCUMENTS
+    GET /students/documents
+    Headers: Authorization: Bearer {token}
+    Response: Array of document objects
+
+40. GET STUDENT PROFILE
+    GET /students/me
+    Headers: Authorization: Bearer {token}
+    Response:
+    {
+      "id": "string",
+      "name": "string",
+      "email": "string",
+      "student_id": "string",
+      "enrollment_status": "active" | "inactive",
+      "academic_standing": "string",
+      "last_login": "datetime"
+    }
+
+================================================================================
+NOTIFICATIONS
+================================================================================
+
+41. GET NOTIFICATIONS
+    GET /notifications
+    Headers: Authorization: Bearer {token}
+    Query Params: ?unread_only=true&page=1&limit=20
+    Response:
+    {
+      "notifications": [
+        {
+          "id": "string",
+          "type": "string",
+          "title": "string",
+          "message": "string",
+          "read": boolean,
+          "created_at": "datetime"
+        }
+      ],
+      "unread_count": number
+    }
+
+42. MARK NOTIFICATION AS READ
+    PUT /notifications/{notification_id}/read
+    Headers: Authorization: Bearer {token}
+    Response: { "message": "Notification marked as read" }
+
+43. MARK ALL AS READ
+    PUT /notifications/read-all
+    Headers: Authorization: Bearer {token}
+    Response: { "message": "All notifications marked as read" }
+
+================================================================================
+ERROR RESPONSES
+================================================================================
+
+All endpoints should return appropriate HTTP status codes:
+- 200: Success
+- 201: Created
+- 400: Bad Request (validation errors)
+- 401: Unauthorized (invalid/missing token)
+- 403: Forbidden (insufficient permissions)
+- 404: Not Found
+- 500: Internal Server Error
+
+Error Response Format:
+{
+  "detail": "Error message",
+  "code": "ERROR_CODE" (optional),
+  "field": "field_name" (optional, for validation errors)
+}
+
+================================================================================
+DATABASE SCHEMA SUGGESTIONS
+================================================================================
+
+Tables needed:
+1. users (id, name, email, password_hash, user_type, status, created_at, last_login)
+2. seating_plans (id, filename, uploaded_by, uploaded_at, status, total_seats, data_json)
+3. exams (id, name, course_code, instructor_id, scheduled_date, duration_minutes, seating_plan_id, status)
+4. incidents (id, camera_id, student_id, exam_id, type, severity, timestamp, status, confidence, video_url, description)
+5. student_documents (id, student_id, filename, uploaded_at, status, verified_by)
+6. notifications (id, user_id, type, title, message, read, created_at)
+7. exam_assignments (exam_id, student_id, room_id, seat_number)
+
+================================================================================
+IMPLEMENTATION NOTES
+================================================================================
+
+1. Use JWT for authentication with access tokens (short-lived) and refresh tokens
+2. Implement role-based access control (RBAC) for endpoints
+3. Use PostgreSQL or MySQL for database
+4. Implement file upload handling for PDFs and documents
+5. Use async/await for database operations
+6. Implement proper error handling and logging
+7. Add rate limiting for API endpoints
+8. Use environment variables for sensitive configuration
+9. Implement database migrations for schema management
+10. Add input validation for all endpoints
+11. Use proper HTTP status codes
+12. Implement pagination for list endpoints
+13. Add filtering and sorting capabilities
+14. Use proper CORS configuration for frontend integration
+
+================================================================================
+END OF SPECIFICATION
+================================================================================
+
