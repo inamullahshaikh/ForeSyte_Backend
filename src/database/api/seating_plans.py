@@ -140,7 +140,6 @@ def get_seating_plans(
         
         # Get exams ordered by creation date (most recent first)
         exams = query.order_by(Exam.created_at.desc()).all()
-        print(exams)
     except (OperationalError, StatementError) as e:
         # Handle database transaction errors
         db.rollback()
@@ -284,21 +283,29 @@ def get_seating_plans(
                     # Skip exams with invalid UUIDs
                     continue
                 
+                # Ensure uploaded_at is not None
+                uploaded_at = exam.created_at if exam.created_at else datetime.utcnow()
+                
                 plans.append(SeatingPlanRead(
                     id=exam_id_str,
                     filename=f"Seating Plan - {exam.course}",
                     uploaded_by="System",  # Can be tracked if needed
-                    uploaded_at=exam.created_at,
+                    uploaded_at=uploaded_at,
                     status=plan_status,
                     total_seats=total_seats,
                     rooms=room_infos
                 ))
             except Exception as e:
                 # Skip exams with errors but continue processing others
+                # Log the error for debugging
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Error processing exam {exam.exam_id if exam else 'unknown'}: {str(e)}")
                 continue
         
         # Sort plans by uploaded_at (most recent first) if available, otherwise by exam date
-        plans.sort(key=lambda x: x.uploaded_at if x.uploaded_at else datetime.min.replace(tzinfo=None), reverse=True)
+        # Handle None values safely for sorting
+        plans.sort(key=lambda x: x.uploaded_at if x.uploaded_at else datetime(1970, 1, 1), reverse=True)
         
         # Apply pagination
         total = len(plans)
@@ -313,6 +320,11 @@ def get_seating_plans(
         )
     except Exception as e:
         db.rollback()
+        import logging
+        import traceback
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error processing seating plans: {str(e)}")
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=500,
             detail=f"Error processing seating plans: {str(e)}"
