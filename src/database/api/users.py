@@ -23,6 +23,10 @@ class UserRead(BaseModel):
     status: Optional[str] = "active"
     created_at: Optional[datetime] = None
     last_login: Optional[datetime] = None
+    # User-type specific fields
+    roll_number: Optional[str] = None  # For students
+    designation: Optional[str] = None  # For investigators
+    username: Optional[str] = None  # For admins
 
     model_config = {
         "from_attributes": True
@@ -87,6 +91,11 @@ def convert_user_to_read(user, user_type: str) -> UserRead:
     id_field = get_user_id_field(user_type)
     user_id = str(getattr(user, id_field))
     
+    # Get user-type specific fields
+    roll_number = getattr(user, "roll_number", None) if user_type == "student" else None
+    designation = getattr(user, "designation", None) if user_type == "investigator" else None
+    username = getattr(user, "username", None) if user_type == "admin" else None
+    
     return UserRead(
         id=user_id,
         name=getattr(user, "name", getattr(user, "username", "Unknown")),
@@ -94,7 +103,10 @@ def convert_user_to_read(user, user_type: str) -> UserRead:
         user_type=user_type,
         status=getattr(user, "status", "active"),  # Get status from model or default to active
         created_at=getattr(user, "created_at", None),
-        last_login=None  # Can be added if last_login tracking is implemented
+        last_login=None,  # Can be added if last_login tracking is implemented
+        roll_number=roll_number,
+        designation=designation,
+        username=username
     )
 
 
@@ -229,56 +241,91 @@ def create_user(
     
     user_type = user_data.user_type.lower()
     if user_type not in ["admin", "investigator", "invigilator", "student"]:
-        raise HTTPException(status_code=400, detail="Invalid user type")
+        raise HTTPException(status_code=400, detail="Invalid user type. Must be one of: admin, investigator, invigilator, student")
     
     model = get_user_model(user_type)
     if not model:
         raise HTTPException(status_code=400, detail="Invalid user type")
     
-    # Check if email already exists
-    existing = db.query(model).filter(model.email == user_data.email).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Email already registered")
+    # Check if email already exists across ALL user types
+    email_lower = user_data.email.lower()
+    existing_admin = db.query(Admin).filter(Admin.email == email_lower).first()
+    existing_investigator = db.query(Investigator).filter(Investigator.email == email_lower).first()
+    existing_invigilator = db.query(Invigilator).filter(Invigilator.email == email_lower).first()
+    existing_student = db.query(Student).filter(Student.email == email_lower).first()
+    
+    if existing_admin or existing_investigator or existing_invigilator or existing_student:
+        raise HTTPException(status_code=400, detail="Email already registered with another user account")
     
     # Import hash_password from auth
     from database.auth import hash_password
     
+    # Validate required fields based on user type
+    if user_type == "admin":
+        # For admin, use name as username if username is not provided
+        username = user_data.username or user_data.name or user_data.email
+        if not username:
+            raise HTTPException(status_code=400, detail="Username, name, or email is required for admin users")
+        
+        # Check if username already exists for admin users
+        existing_username = db.query(Admin).filter(Admin.username == username).first()
+        if existing_username:
+            raise HTTPException(status_code=400, detail="Username already taken by another admin")
+    elif user_type in ["invigilator", "investigator", "student"]:
+        if not user_data.name:
+            raise HTTPException(status_code=400, detail="Name is required for this user type")
+    
+    # Validate password
+    if not user_data.password or len(user_data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+    
     # Create user based on type
     if user_type == "admin":
+        username = user_data.username or user_data.name or user_data.email
         new_user = Admin(
-            username=user_data.username or user_data.email,
-            email=user_data.email,
+            username=username,
+            email=user_data.email.lower(),
             password_hash=hash_password(user_data.password),
+            created_at=datetime.utcnow()
             # status field will be available after database migration
             # status=user_data.status or "active"
         )
     elif user_type == "invigilator":
         new_user = Invigilator(
-            name=user_data.name,
-            email=user_data.email,
+            name=user_data.name.strip(),
+            email=user_data.email.lower(),
             password_hash=hash_password(user_data.password),
             photo_url=user_data.photo_url,
+            created_at=datetime.utcnow()
             # status field will be available after database migration
             # status=user_data.status or "active"
         )
     elif user_type == "investigator":
         new_user = Investigator(
-            name=user_data.name,
-            email=user_data.email,
-            designation=user_data.designation,
+            name=user_data.name.strip(),
+            email=user_data.email.lower(),
+            designation=user_data.designation.strip() if user_data.designation else None,
             password_hash=hash_password(user_data.password),
+            created_at=datetime.utcnow()
             # status field will be available after database migration
             # status=user_data.status or "active"
         )
     elif user_type == "student":
         if not user_data.roll_number:
             raise HTTPException(status_code=400, detail="roll_number is required for students")
+        
+        # Check if roll_number already exists for students
+        existing_roll = db.query(Student).filter(Student.roll_number == user_data.roll_number.strip()).first()
+        if existing_roll:
+            raise HTTPException(status_code=400, detail="A student with this roll number already exists")
+        
         new_user = Student(
-            name=user_data.name,
-            email=user_data.email,
-            roll_number=user_data.roll_number,
+            name=user_data.name.strip(),
+            email=user_data.email.lower(),
+            roll_number=user_data.roll_number.strip(),
             photo_url=user_data.photo_url,
             password_hash=hash_password(user_data.password),
+            created_at=datetime.utcnow()
             # status field will be available after database migration
             # status=user_data.status or "active"
         )
