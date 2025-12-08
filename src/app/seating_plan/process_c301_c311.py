@@ -110,8 +110,7 @@ def main():
     
     # Process C301 and C311
     rooms_to_process = [
-        "C301-25112025",
-        "C311-25112025"
+        "D314-25112025",
     ]
     
     print("\n" + "="*70)

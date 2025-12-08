@@ -24,6 +24,9 @@ latest_room_data = {}
 EXTRACTIONS_DIR = Path("./app/seating_plan/extractions")
 EXTRACTIONS_DIR.mkdir(exist_ok=True)
 
+CSFYP_DIR = Path("./app/seating_plan/CSFYP")
+
+# Default paths (fallback)
 SEAT_MAP_PATH = Path("./app/seating_plan/seat_map.json")
 CCTV_IMAGE_PATH = Path("./app/seating_plan/cctv_frame.jpg")
 
@@ -90,6 +93,109 @@ def parse_date_time(date_str: str, time_str: str):
     
     return exam_date, start_time, end_time
 
+def get_room_paths(room_no: str):
+    """
+    Get room-specific seat_map.json and image paths based on room number.
+    
+    Args:
+        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311"
+    
+    Returns:
+        tuple: (seat_map_path, image_path) or (None, None) if not found
+    """
+    # Normalize room number (handle both "A-104" and "A104" formats)
+    room_no_upper = room_no.upper().replace('-', '').replace(' ', '')
+    room_block = room_no_upper[0] if room_no_upper and room_no_upper[0].isalpha() else None
+    room_num = room_no_upper[1:] if len(room_no_upper) > 1 else None
+    
+    if not room_block or not room_num:
+        return None, None
+    
+    # Determine which CSFYP folder to use
+    if room_block == 'A':
+        # A block uses A104-25112025 folder
+        room_folder = CSFYP_DIR / "A104-25112025"
+    elif room_block == 'B':
+        # B block uses B127-25112025 folder
+        room_folder = CSFYP_DIR / "B127-25112025"
+    elif room_block == 'C':
+        # C block: C311 is exception, others use C301-25112025
+        if room_num == '311':
+            room_folder = CSFYP_DIR / "C311-25112025"
+        else:
+            # C301, C307, etc. use C301-25112025
+            room_folder = CSFYP_DIR / "C301-25112025"
+    else:
+        return None, None
+    
+    # Find seat_map.json
+    seat_map_path = room_folder / "seat_map.json"
+    if not seat_map_path.exists():
+        return None, None
+    
+    # Find corresponding image (.jpg file)
+    image_files = list(room_folder.glob("*.jpg"))
+    if not image_files:
+        return None, None
+    
+    image_path = image_files[0]  # Use first .jpg file found
+    
+    return seat_map_path, image_path
+
+def get_column_mapping(room_no: str, max_col: int):
+    """
+    Get column mapping based on room block and max column.
+    
+    Args:
+        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311"
+        max_col: Maximum column number from seating plan
+    
+    Returns:
+        dict: Mapping from input column to seat_map column
+    """
+    # Normalize room number (handle both "A-104" and "A104" formats)
+    room_no_upper = room_no.upper().replace('-', '').replace(' ', '')
+    room_block = room_no_upper[0] if room_no_upper and room_no_upper[0].isalpha() else None
+    room_num = room_no_upper[1:] if len(room_no_upper) > 1 else None
+    
+    if room_block == 'A':
+        # A block (e.g., A104): max c6 or c5
+        # For A104, always use the full mapping based on detected max column
+        # If max_col is exactly 5, use c5 mapping; otherwise use c6 mapping
+        if max_col == 5:
+            # c1→c1, c2→c3, c3→c5, c4→c7, c5→c9
+            return {1: 1, 2: 3, 3: 5, 4: 7, 5: 9}
+        else:
+            # Default to c6 mapping for A104 (c1→c1, c2→c3, c3→c4, c4→c7, c5→c8, c6→c10)
+            # This handles cases where max_col is 6 or any other value
+            return {1: 1, 2: 3, 3: 4, 4: 7, 5: 8, 6: 10}
+    
+    elif room_block == 'B':
+        # B block (e.g., B127): max c4
+        if max_col == 4:
+            return {1: 1, 2: 3, 3: 5, 4: 7}
+        else:
+            return {i: i for i in range(1, max_col + 1)}
+    
+    elif room_block == 'C':
+        if room_num == '311':
+            # C311: max c4
+            if max_col == 4:
+                return {1: 1, 2: 3, 3: 6, 4: 8}
+            else:
+                return {i: i for i in range(1, max_col + 1)}
+        else:
+            # C301, C307, etc.: max c6 or c5
+            if max_col == 6:
+                return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
+            elif max_col == 5:
+                return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
+            else:
+                return {i: i for i in range(1, max_col + 1)}
+    
+    # Default: 1:1 mapping
+    return {i: i for i in range(1, max_col + 1)}
+
 
 # -------- Main Endpoint --------
 @router.post("/upload-seating-plan")
@@ -106,30 +212,76 @@ async def upload_seating_plan(
     try:
         pdf_bytes = await file.read()
         with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            text = "\n".join([page.extract_text() or "" for page in pdf.pages])
-        text = re.sub(r'\s+', ' ', text)
+            # Extract text from each page separately to track page boundaries
+            page_texts = [page.extract_text() or "" for page in pdf.pages]
+            full_text = "\n".join(page_texts)
+            full_text = re.sub(r'\s+', ' ', full_text)
 
-        block_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}\s+\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?.*?Name\s*of\s*Invigilator:.*?)(?=(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4}|$)'
-        all_blocks = re.finditer(block_pattern, text, re.IGNORECASE | re.DOTALL)
-
+        # Find all exam block headers (date/time) across all pages
+        exam_header_pattern = r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?)'
+        all_headers = list(re.finditer(exam_header_pattern, full_text, re.IGNORECASE))
+        
         matching_exams = []
-        for block_match in all_blocks:
-            block_text = block_match.group(1)
-            date_time_match = re.search(
-                r'((?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\s+\d{1,2},\s*\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM)?\s*to\s*\d{1,2}:\d{2}\s*(?:AM|PM)?)',
-                block_text,
-                re.IGNORECASE,
-            )
+        
+        # Process each exam block
+        for i, header_match in enumerate(all_headers):
+            header_start = header_match.start()
+            exam_date = header_match.group(1)
+            exam_time = header_match.group(2)
+            
+            # Find the end of this block - continue until we hit a different exam
+            block_end = len(full_text)
+            
+            # Check if there's a next header
+            if i + 1 < len(all_headers):
+                next_header_start = all_headers[i + 1].start()
+                next_header_date = all_headers[i + 1].group(1)
+                next_header_time = all_headers[i + 1].group(2)
+                
+                # Extract text from current header to next header to check room
+                text_before_next = full_text[header_start:next_header_start]
+                current_room_match = re.search(r'Room\s*No\.?\s*([A-Z]-\d+)', text_before_next, re.IGNORECASE)
+                
+                # Extract text from next header to check if it's same exam
+                text_after_next = full_text[next_header_start:min(next_header_start + 500, len(full_text))]
+                next_room_match = re.search(r'Room\s*No\.?\s*([A-Z]-\d+)', text_after_next, re.IGNORECASE)
+                
+                # Determine if next header is a different exam
+                is_different_exam = False
+                
+                # Different date = different exam
+                if next_header_date != exam_date:
+                    is_different_exam = True
+                # Different time = different exam
+                elif not time_slots_match(next_header_time, exam_time):
+                    is_different_exam = True
+                # Different room = different exam
+                elif current_room_match and next_room_match:
+                    current_room = current_room_match.group(1).strip().upper()
+                    next_room = next_room_match.group(1).strip().upper()
+                    if current_room != next_room:
+                        is_different_exam = True
+                
+                # If it's a different exam, stop at next header
+                if is_different_exam:
+                    block_end = next_header_start
+                # Otherwise, same exam continues - include content up to next different exam
+                # (we'll handle this by continuing to collect students)
+            
+            # Extract block text from header to determined end
+            block_text = full_text[header_start:block_end]
+            
+            # Find room number in this block
             room_match = re.search(r'Room\s*No\.?\s*([A-Z]-\d+)', block_text, re.IGNORECASE)
-            if not date_time_match or not room_match:
+            if not room_match:
                 continue
-
-            exam_date = date_time_match.group(1)
-            exam_time = date_time_match.group(2)
+            
             detected_room = room_match.group(1).strip()
 
-            # Filter by room/time
-            room_matches = detected_room.upper() == room_no.upper() if room_no else True
+            # Filter by room/time (normalize both for comparison)
+            detected_room_normalized = detected_room.upper().replace('-', '').replace(' ', '')
+            room_no_normalized = room_no.upper().replace('-', '').replace(' ', '') if room_no else None
+            room_matches = detected_room_normalized == room_no_normalized if room_no else True
             time_matches = time_slots_match(exam_time, time_slot) if time_slot else True
             if not (room_matches and time_matches):
                 continue
@@ -144,16 +296,31 @@ async def upload_seating_plan(
             section = course_match.group(2).strip() if course_match else None
             invigilator_name = invigilator_match.group(1).strip() if invigilator_match else None
 
-            # Extract students
+            # Extract students from the entire block (may span multiple pages)
+            # Pattern matches: serial number, roll number, name, seat number
             pattern = r'(\d+)\s+(\d{2}[A-Z]-\d{4})\s+([A-Za-z\s]+?)\s+(C\dR\d|Chair\d)'
             students = []
-            for s_no, roll_no, name, seat in re.findall(pattern, block_text):
+            seen_roll_nos = set()  # To avoid duplicates if same student appears multiple times
+            
+            all_matches = re.findall(pattern, block_text)
+            print(f"[DEBUG] Found {len(all_matches)} student matches in block for room {detected_room}")
+            
+            for s_no, roll_no, name, seat in all_matches:
+                roll_no_clean = roll_no.strip()
+                # Skip if we've already seen this roll number (duplicate)
+                if roll_no_clean in seen_roll_nos:
+                    print(f"[DEBUG] Skipping duplicate roll number: {roll_no_clean}")
+                    continue
+                seen_roll_nos.add(roll_no_clean)
+                
                 students.append({
                     "serial_no": s_no.strip(),
-                    "roll_no": roll_no.strip(),
+                    "roll_no": roll_no_clean,
                     "name": name.strip(),
                     "seat_no": seat.strip()
                 })
+            
+            print(f"[DEBUG] Extracted {len(students)} unique students for room {detected_room} (date: {exam_date}, time: {exam_time})")
 
             matching_exams.append({
                 "exam_date": exam_date,
@@ -270,11 +437,23 @@ async def upload_seating_plan(
             json.dump(selected_exam, f, indent=4, default=str)
 
         # ---------- Visualize ----------
-        frame = cv2.imread(str(CCTV_IMAGE_PATH))
+        # Get room-specific paths
+        room_number = selected_exam['room_no']
+        seat_map_path, image_path = get_room_paths(room_number)
+        
+        if not seat_map_path or not image_path:
+            raise FileNotFoundError(f"Could not find seat_map.json or image for room {room_number}")
+        
+        print(f"[DEBUG] Using seat_map: {seat_map_path}")
+        print(f"[DEBUG] Using image: {image_path}")
+        
+        # Load room-specific image
+        frame = cv2.imread(str(image_path))
         if frame is None:
-            raise FileNotFoundError("Could not load CCTV image")
+            raise FileNotFoundError(f"Could not load image from {image_path}")
 
-        with open(SEAT_MAP_PATH) as f:
+        # Load room-specific seat map
+        with open(seat_map_path) as f:
             seat_map = json.load(f)["seats"]
 
         # Find maximum column from seating plan
@@ -287,21 +466,43 @@ async def upload_seating_plan(
                 col_num = int(col_match.group(1))
                 max_column = max(max_column, col_num)
 
-        # Create column mapping based on max column
-        def get_column_mapping(max_col):
-            """Create mapping from input columns to seat_map columns"""
-            if max_col == 6:
-                # Map: c1→c1, c2→c3, c3→c5, c4→c6, c5→c8, c6→c10
-                return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
-            elif max_col == 5:
-                # Map: c1→c1, c2→c4, c3→c6, c4→c8, c5→c10
-                return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
-            else:
-                # Default: map 1:1 for other cases
-                return {i: i for i in range(1, max_col + 1)}
-
-        column_mapping = get_column_mapping(max_column)
-        print(f"[DEBUG] Max column: {max_column}, Mapping: {column_mapping}")
+        # Get column mapping based on room and max column
+        # Normalize room number for mapping (handle both "A-104" and "A104" formats)
+        room_number_normalized = room_number.upper().replace('-', '').replace(' ', '')
+        column_mapping = get_column_mapping(room_number, max_column)
+        
+        # Debug: Show all unique seat columns found
+        unique_cols = []
+        for student in selected_exam["students"]:
+            seat_no = student["seat_no"].upper()
+            col_match = re.search(r'C(\d+)', seat_no)
+            if col_match:
+                unique_cols.append(int(col_match.group(1)))
+        unique_cols = sorted(set(unique_cols))
+        print(f"[DEBUG] Room: {room_number} (normalized: {room_number_normalized})")
+        print(f"[DEBUG] Detected columns in seating plan: {unique_cols}, Max column: {max_column}")
+        print(f"[DEBUG] Column mapping applied: {column_mapping}")
+        
+        # Check if we got a default mapping (indicates room block not recognized)
+        default_mapping = {i: i for i in range(1, max_column + 1)}
+        if column_mapping == default_mapping and max_column > 0:
+            print(f"[WARNING] Using default 1:1 mapping for room {room_number}. Room block may not be recognized.")
+        
+        # Debug: Show sample seat mappings
+        if selected_exam["students"]:
+            print(f"[DEBUG] Sample seat mappings (first 5 students):")
+            for student in selected_exam["students"][:5]:
+                seat_no = student["seat_no"].upper()
+                match = re.search(r'C(\d+)R(\d+)', seat_no)
+                if match:
+                    input_col = int(match.group(1))
+                    row = int(match.group(2))
+                    mapped_col = column_mapping.get(input_col)
+                    if mapped_col:
+                        mapped_seat = f"seat_c{mapped_col}r{row}"
+                        print(f"  {seat_no} -> {mapped_seat} (col {input_col} -> {mapped_col})")
+                    else:
+                        print(f"  {seat_no} -> NO MAPPING (col {input_col} not in mapping)")
 
         # Create a mapping from input seat numbers to seat_map IDs
         def map_seat_to_seat_map(seat_no):
