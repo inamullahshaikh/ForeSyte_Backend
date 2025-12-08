@@ -296,12 +296,6 @@ app/seating_plan/*.pdf
 # Temporary images
 app/seating_plan/cctv_frame.jpg
 
-# Generated files (be specific - don't ignore all JSON)
-seat_map.json
-# Only ignore JSON files in specific directories
-app/seating_plan/extractions/*.json
-app/seating_plan/seat_map.json
-
 # Configuration files with secrets
 config.ini
 secrets.yaml
