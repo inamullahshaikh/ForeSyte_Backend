@@ -98,7 +98,7 @@ def get_room_paths(room_no: str):
     Get room-specific seat_map.json and image paths based on room number.
     
     Args:
-        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311"
+        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311", "D-314"
     
     Returns:
         tuple: (seat_map_path, image_path) or (None, None) if not found
@@ -125,6 +125,9 @@ def get_room_paths(room_no: str):
         else:
             # C301, C307, etc. use C301-25112025
             room_folder = CSFYP_DIR / "C301-25112025"
+    elif room_block == 'D':
+        # D block uses D314-25112025 folder
+        room_folder = CSFYP_DIR / "D314-25112025"
     else:
         return None, None
     
@@ -147,7 +150,7 @@ def get_column_mapping(room_no: str, max_col: int):
     Get column mapping based on room block and max column.
     
     Args:
-        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311"
+        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311", "D-314"
         max_col: Maximum column number from seating plan
     
     Returns:
@@ -192,6 +195,15 @@ def get_column_mapping(room_no: str, max_col: int):
                 return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
             else:
                 return {i: i for i in range(1, max_col + 1)}
+    
+    elif room_block == 'D':
+        # D block (e.g., D314): max c6 or c5
+        if max_col == 6:
+            return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
+        elif max_col == 5:
+            return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
+        else:
+            return {i: i for i in range(1, max_col + 1)}
     
     # Default: 1:1 mapping
     return {i: i for i in range(1, max_col + 1)}

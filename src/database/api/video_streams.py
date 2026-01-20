@@ -29,7 +29,7 @@ router = APIRouter(
 
 # Configuration
 USE_DATABASE = os.getenv("USE_DATABASE", "false").lower() == "true"
-MAX_FILE_SIZE = 500 * 1024 * 1024  # 500MB
+MAX_FILE_SIZE = 20 * 1024 * 1024 * 1024  # 20 GB
 ALLOWED_EXTENSIONS = {'.mp4', '.avi', '.mov', '.mkv', '.webm'}
 
 # -------------------------
@@ -108,7 +108,9 @@ def validate_video_file(filename: str, file_size: int) -> tuple[bool, str]:
         return False, f"Invalid file format. Allowed: {', '.join(ALLOWED_EXTENSIONS)}"
     
     if file_size > MAX_FILE_SIZE:
-        return False, f"File too large. Maximum size: {MAX_FILE_SIZE / (1024*1024)}MB"
+        file_size_gb = file_size / (1024 * 1024 * 1024)
+        max_size_gb = MAX_FILE_SIZE / (1024 * 1024 * 1024)
+        return False, f"File too large ({file_size_gb:.2f} GB). Maximum size: {max_size_gb:.0f} GB"
     
     return True, "Valid"
 

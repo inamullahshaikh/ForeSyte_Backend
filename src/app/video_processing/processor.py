@@ -279,9 +279,10 @@ class VideoProcessor:
                     logger.warning(f"Progress callback error: {e}")
         
         # Step 3: Process video frames in batch mode
-        # Pass progress_callback to stream_handler which will call it during frame extraction
+        # Pass progress_callback, room_id, and db_session to stream_handler which will call it during frame extraction
         extraction_result = self.stream_handler.process_recorded_video(
-            video_path, stream_id, progress_callback
+            video_path, stream_id, progress_callback, 
+            room_id=room_id, db_session=self.db_session
         )
         
         if not extraction_result['success']:

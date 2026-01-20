@@ -1,0 +1,66 @@
+{
+  "timestamp": "2026-01-15T21:35:50.803114",
+  "image_analyzed": "D:\\foresyte\\ForeSyte_Backend\\src\\app\\seating_plan\\CSFYP\\D314-25112025\\D314_frame_28m44s.jpg",
+  "model_used": "last",
+  "summary": {
+    "total_detections": 2,
+    "people_detected": 1,
+    "suspicious_objects": 0,
+    "behaviors_detected": 1,
+    "risk_score": 6,
+    "assessment": "Medium risk - Multiple suspicious behaviors"
+  },
+  "severity_breakdown": {
+    "low": 1,
+    "medium": 0,
+    "high": 1
+  },
+  "behavior_counts": {
+    "stand_up": 1,
+    "normal": 1
+  },
+  "behavior_detections": [
+    "Stand Up"
+  ],
+  "seat_violations": {},
+  "all_detections": [
+    {
+      "type": "behavior",
+      "class": "Stand Up",
+      "confidence": 0.8061624765396118,
+      "bbox": [
+        1723,
+        287,
+        1861,
+        710
+      ],
+      "seat_id": "unknown",
+      "behavior": "stand_up",
+      "severity": "high",
+      "color": [
+        0,
+        0,
+        255
+      ]
+    },
+    {
+      "type": "behavior",
+      "class": "Normal",
+      "confidence": 0.2577687203884125,
+      "bbox": [
+        16,
+        186,
+        107,
+        292
+      ],
+      "seat_id": "unknown",
+      "behavior": "normal",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    }
+  ]
+}
