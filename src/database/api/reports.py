@@ -13,6 +13,66 @@ from database.auth import get_current_user
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
 # -------------------------
+# Helper Functions
+# -------------------------
+def get_investigator_id_for_report(current_user: dict, db: Session) -> UUID:
+    """
+    Get the appropriate investigator_id for report generation.
+    If user is an investigator, use their ID. If admin, use a default investigator.
+    Always returns a valid investigator_id - creates a system investigator if needed.
+    """
+    user_type = current_user.get("user_type")
+    user_id = current_user.get("id")
+    
+    # Debug logging
+    print(f"[REPORT DEBUG] get_investigator_id_for_report called - user_type: {user_type}, user_id: {user_id}")
+    
+    if user_type == "investigator":
+        try:
+            investigator_id = UUID(user_id)
+            # Verify the investigator exists
+            investigator = db.query(Investigator).filter(Investigator.investigator_id == investigator_id).first()
+            if not investigator:
+                print(f"[REPORT DEBUG] WARNING: Investigator {investigator_id} not found! Creating system investigator...")
+                # Fall through to create system investigator
+            else:
+                print(f"[REPORT DEBUG] Using investigator ID: {investigator_id}")
+                return investigator_id
+        except (ValueError, TypeError) as e:
+            print(f"[REPORT DEBUG] Invalid investigator ID format: {e}. Creating system investigator...")
+            # Fall through to create system investigator
+    
+    # For admins OR if investigator not found, use/create a system investigator
+    print(f"[REPORT DEBUG] Looking for default investigator...")
+    default_investigator = db.query(Investigator).first()
+    
+    if default_investigator:
+        print(f"[REPORT DEBUG] Found investigator ID: {default_investigator.investigator_id}")
+        return default_investigator.investigator_id
+    else:
+        # Create a system investigator if none exists
+        print(f"[REPORT DEBUG] No investigators found! Creating system investigator...")
+        from database.auth import hash_password
+        
+        # Check again to avoid race condition (in case another request created one)
+        default_investigator = db.query(Investigator).filter(Investigator.email == "system@foresyte.edu").first()
+        if default_investigator:
+            print(f"[REPORT DEBUG] System investigator already exists: {default_investigator.investigator_id}")
+            return default_investigator.investigator_id
+        
+        system_investigator = Investigator(
+            name="System Investigator",
+            email="system@foresyte.edu",
+            designation="System",
+            password_hash=hash_password("System123!")
+        )
+        db.add(system_investigator)
+        db.commit()
+        db.refresh(system_investigator)
+        print(f"[REPORT DEBUG] Created system investigator with ID: {system_investigator.investigator_id}")
+        return system_investigator.investigator_id
+
+# -------------------------
 # Pydantic Schemas
 # -------------------------
 class ReportCreate(BaseModel):
@@ -148,11 +208,14 @@ def generate_incident_report(
         db.commit()
         db.refresh(violation)
 
+    # Get investigator_id for report (handles both admin and investigator users)
+    investigator_id = get_investigator_id_for_report(current_user, db)
+    
     new_report = Report(
         report_type="incident",
         file_path=file_path,
         violation_id=violation.violation_id,
-        generated_by=UUID(current_user.get("id"))
+        generated_by=investigator_id
     )
     db.add(new_report)
     db.commit()
@@ -214,11 +277,14 @@ def generate_exam_report(
         db.commit()
         db.refresh(violation)
 
+    # Get investigator_id for report (handles both admin and investigator users)
+    investigator_id = get_investigator_id_for_report(current_user, db)
+
     new_report = Report(
         report_type="exam",
         file_path=file_path,
         violation_id=violation.violation_id if violation else None,
-        generated_by=UUID(current_user.get("id"))
+        generated_by=investigator_id
     )
     db.add(new_report)
     db.commit()
