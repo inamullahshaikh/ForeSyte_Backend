@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-01-15T21:34:39.391402",
+  "image_analyzed": "D:\\foresyte\\ForeSyte_Backend\\src\\app\\seating_plan\\CSFYP\\D314-25112025\\D314_frame_28m44s.jpg",
+  "model_used": "best",
+  "summary": {
+    "total_detections": 0,
+    "people_detected": 0,
+    "suspicious_objects": 0,
+    "risk_score": 0,
+    "assessment": "No suspicious activity detected"
+  },
+  "severity_breakdown": {
+    "low": 0,
+    "medium": 0,
+    "high": 0
+  },
+  "behavior_counts": {},
+  "seat_violations": {},
+  "all_detections": []
+}

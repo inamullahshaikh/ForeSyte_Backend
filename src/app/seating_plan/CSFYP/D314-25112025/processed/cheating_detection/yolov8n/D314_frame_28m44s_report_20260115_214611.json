@@ -1,0 +1,455 @@
+{
+  "timestamp": "2026-01-15T21:46:11.144876",
+  "image_analyzed": "D:\\foresyte\\ForeSyte_Backend\\src\\app\\seating_plan\\CSFYP\\D314-25112025\\D314_frame_28m44s.jpg",
+  "model_used": "yolov8n",
+  "summary": {
+    "total_detections": 17,
+    "people_detected": 17,
+    "suspicious_objects": 0,
+    "behaviors_detected": 0,
+    "risk_score": 41,
+    "assessment": "High risk - Serious violations detected"
+  },
+  "severity_breakdown": {
+    "low": 5,
+    "medium": 12,
+    "high": 0
+  },
+  "behavior_counts": {
+    "normal_posture": 5,
+    "turned_sideways": 12
+  },
+  "behavior_detections": [],
+  "seat_violations": {
+    "c5r2": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.6700538992881775
+      }
+    ],
+    "c1r3": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.560457706451416
+      }
+    ],
+    "c3r2": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.5230885744094849
+      }
+    ],
+    "c1r1": [
+      {
+        "behavior": "normal_posture",
+        "severity": "low",
+        "confidence": 0.5006640553474426
+      }
+    ],
+    "c5r6": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.46166154742240906
+      }
+    ],
+    "c8r2": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.4574981927871704
+      }
+    ],
+    "c1r6": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.4128531217575073
+      }
+    ],
+    "c3r4": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.38449016213417053
+      }
+    ],
+    "c10r4": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.37840402126312256
+      }
+    ],
+    "c8r3": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.37745124101638794
+      }
+    ],
+    "c9r2": [
+      {
+        "behavior": "normal_posture",
+        "severity": "low",
+        "confidence": 0.3759584128856659
+      }
+    ],
+    "c6r5": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.36066246032714844
+      }
+    ],
+    "c6r4": [
+      {
+        "behavior": "normal_posture",
+        "severity": "low",
+        "confidence": 0.3381916880607605
+      }
+    ],
+    "c9r1": [
+      {
+        "behavior": "normal_posture",
+        "severity": "low",
+        "confidence": 0.29783228039741516
+      }
+    ],
+    "c10r1": [
+      {
+        "behavior": "turned_sideways",
+        "severity": "medium",
+        "confidence": 0.2684051990509033
+      }
+    ]
+  },
+  "all_detections": [
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.8138813376426697,
+      "bbox": [
+        1709,
+        299,
+        1846,
+        733
+      ],
+      "seat_id": "unknown",
+      "behavior": "normal_posture",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.6700538992881775,
+      "bbox": [
+        748,
+        315,
+        898,
+        474
+      ],
+      "seat_id": "c5r2",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.560457706451416,
+      "bbox": [
+        17,
+        356,
+        149,
+        537
+      ],
+      "seat_id": "c1r3",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.5230885744094849,
+      "bbox": [
+        542,
+        381,
+        691,
+        584
+      ],
+      "seat_id": "c3r2",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.5006640553474426,
+      "bbox": [
+        53,
+        580,
+        198,
+        884
+      ],
+      "seat_id": "c1r1",
+      "behavior": "normal_posture",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.46166154742240906,
+      "bbox": [
+        489,
+        141,
+        580,
+        253
+      ],
+      "seat_id": "c5r6",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.4574981927871704,
+      "bbox": [
+        1140,
+        260,
+        1270,
+        388
+      ],
+      "seat_id": "c8r2",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.4128531217575073,
+      "bbox": [
+        11,
+        191,
+        111,
+        308
+      ],
+      "seat_id": "c1r6",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.38449016213417053,
+      "bbox": [
+        364,
+        233,
+        479,
+        346
+      ],
+      "seat_id": "c3r4",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.37840402126312256,
+      "bbox": [
+        1117,
+        147,
+        1239,
+        241
+      ],
+      "seat_id": "c10r4",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.37745124101638794,
+      "bbox": [
+        1008,
+        205,
+        1103,
+        306
+      ],
+      "seat_id": "c8r3",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.3759584128856659,
+      "bbox": [
+        1354,
+        245,
+        1461,
+        477
+      ],
+      "seat_id": "c9r2",
+      "behavior": "normal_posture",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.3681964576244354,
+      "bbox": [
+        433,
+        120,
+        521,
+        220
+      ],
+      "seat_id": "unknown",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.36066246032714844,
+      "bbox": [
+        650,
+        130,
+        764,
+        287
+      ],
+      "seat_id": "c6r5",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.3381916880607605,
+      "bbox": [
+        739,
+        177,
+        835,
+        358
+      ],
+      "seat_id": "c6r4",
+      "behavior": "normal_posture",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.29783228039741516,
+      "bbox": [
+        1533,
+        329,
+        1654,
+        585
+      ],
+      "seat_id": "c9r1",
+      "behavior": "normal_posture",
+      "severity": "low",
+      "color": [
+        0,
+        255,
+        0
+      ]
+    },
+    {
+      "type": "person",
+      "class": "person",
+      "confidence": 0.2684051990509033,
+      "bbox": [
+        1537,
+        329,
+        1655,
+        431
+      ],
+      "seat_id": "c10r1",
+      "behavior": "turned_sideways",
+      "severity": "medium",
+      "color": [
+        0,
+        165,
+        255
+      ]
+    }
+  ]
+}

@@ -10,6 +10,8 @@ from typing import Optional, Dict, Any
 import asyncio
 from pathlib import Path
 import logging
+import json
+import numpy as np
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,11 +30,15 @@ class VideoStreamHandler:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.frame_dir.mkdir(parents=True, exist_ok=True)
         
+        # Path to seating plan directory
+        self.seating_plan_dir = Path(__file__).parent.parent / "seating_plan"
+        self.csfyp_dir = self.seating_plan_dir / "CSFYP"
+        
     def validate_video_input(self, source: str, stream_type: str) -> Dict[str, Any]:
         """
         Step 2 of UC-07: Validates video input and prepares it for analysis
         
-        Args:
+        Args: 
             source: Video file path or CCTV stream URL
             stream_type: 'live' or 'recorded'
             
@@ -91,8 +97,115 @@ class VideoStreamHandler:
                 "source": source
             }
     
+    def _get_room_paths(self, room_no: str):
+        """
+        Get room-specific seat_map.json path based on room number.
+        Helper function similar to upload_plan.py get_room_paths.
+        
+        Args:
+            room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311", "D-314"
+        
+        Returns:
+            seat_map_path or None if not found
+        """
+        # Normalize room number (handle both "A-104" and "A104" formats)
+        room_no_upper = room_no.upper().replace('-', '').replace(' ', '')
+        room_block = room_no_upper[0] if room_no_upper and room_no_upper[0].isalpha() else None
+        room_num = room_no_upper[1:] if len(room_no_upper) > 1 else None
+        
+        if not room_block or not room_num:
+            return None
+        
+        # Determine which CSFYP folder to use
+        if room_block == 'A':
+            room_folder = self.csfyp_dir / "A104-25112025"
+        elif room_block == 'B':
+            room_folder = self.csfyp_dir / "B127-25112025"
+        elif room_block == 'C':
+            if room_num == '311':
+                room_folder = self.csfyp_dir / "C311-25112025"
+            else:
+                room_folder = self.csfyp_dir / "C301-25112025"
+        elif room_block == 'D':
+            room_folder = self.csfyp_dir / "D314-25112025"
+        else:
+            return None
+        
+        # Find seat_map.json
+        seat_map_path = room_folder / "seat_map.json"
+        if not seat_map_path.exists():
+            logger.warning(f"Seat map not found at {seat_map_path}")
+            return None
+        
+        return seat_map_path
+    
+    def _load_seat_map(self, seat_map_path: Path, frame_width: int, frame_height: int):
+        """
+        Load seat map JSON and scale coordinates to match frame dimensions.
+        
+        Args:
+            seat_map_path: Path to seat_map.json file
+            frame_width: Width of the video frame
+            frame_height: Height of the video frame
+        
+        Returns:
+            Dictionary of seat_id -> scaled polygon points, or None if error
+        """
+        try:
+            with open(seat_map_path, 'r', encoding='utf-8') as f:
+                seat_map_data = json.load(f)
+            
+            seats = seat_map_data.get('seats', {})
+            meta = seat_map_data.get('_meta', {})
+            base_w = meta.get('base_w', frame_width)
+            base_h = meta.get('base_h', frame_height)
+            
+            # Calculate scaling factors
+            scale_x = frame_width / base_w if base_w > 0 else 1.0
+            scale_y = frame_height / base_h if base_h > 0 else 1.0
+            
+            # Scale all seat polygons
+            scaled_seats = {}
+            for seat_id, polygon in seats.items():
+                if polygon and len(polygon) >= 3:
+                    scaled_polygon = [
+                        [int(point[0] * scale_x), int(point[1] * scale_y)]
+                        for point in polygon if len(point) >= 2
+                    ]
+                    if len(scaled_polygon) >= 3:
+                        scaled_seats[seat_id] = scaled_polygon
+            
+            logger.info(f"Loaded {len(scaled_seats)} seats from seat map, scaled from {base_w}x{base_h} to {frame_width}x{frame_height}")
+            return scaled_seats
+            
+        except Exception as e:
+            logger.error(f"Error loading seat map: {str(e)}")
+            return None
+    
+    def _draw_seat_boxes(self, frame, seat_map: Dict[str, list]):
+        """
+        Draw green bounding boxes (polygons) on frame for each seat.
+        
+        Args:
+            frame: OpenCV frame (numpy array)
+            seat_map: Dictionary of seat_id -> polygon points
+        """
+        if not seat_map:
+            return
+        
+        for seat_id, polygon in seat_map.items():
+            if len(polygon) < 3:
+                continue
+            
+            # Convert to numpy array for OpenCV
+            pts = np.array(polygon, np.int32)
+            
+            # Draw green polygon outline
+            cv2.polylines(frame, [pts], True, (0, 255, 0), 2)
+    
     def extract_frames(self, video_source: str, frame_rate: int = 1, 
-                      job_id: str = None, progress_callback=None) -> list:
+                      job_id: str = None, progress_callback=None, 
+                      room_id: Optional[str] = None, db_session=None) -> list:
         """
         Extracts frames from video for analysis.
         Used in Step 3 of UC-07: Process video frames
@@ -101,6 +214,9 @@ class VideoStreamHandler:
             video_source: Path to video file or stream URL
             frame_rate: Extract 1 frame per N frames (default: 1 = every frame)
             job_id: Processing job identifier
+            progress_callback: Callback function for progress updates
+            room_id: Room UUID to get seating plan (optional)
+            db_session: Database session to query room info (optional)
             
         Returns:
             List of extracted frame information
@@ -118,6 +234,39 @@ class VideoStreamHandler:
             logger.error(f"Cannot open video source: {video_source}")
             logger.error(f"Tried absolute path: {os.path.abspath(video_source)}")
             return frames_info
+        
+        # Get video dimensions for seat map scaling
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Load seat map if room_id is provided
+        seat_map = None
+        if room_id and db_session:
+            try:
+                from database.models import Room
+                from uuid import UUID
+                
+                room = db_session.query(Room).filter(Room.room_id == UUID(room_id)).first()
+                if room:
+                    # Construct room number from block and room_number
+                    room_no = f"{room.block}-{room.room_number}" if room.block else room.room_number
+                    logger.info(f"Loading seat map for room: {room_no}")
+                    
+                    seat_map_path = self._get_room_paths(room_no)
+                    if seat_map_path:
+                        seat_map = self._load_seat_map(seat_map_path, frame_width, frame_height)
+                        if seat_map:
+                            logger.info(f"Successfully loaded seat map with {len(seat_map)} seats")
+                        else:
+                            logger.warning("Failed to load seat map data")
+                    else:
+                        logger.warning(f"Seat map file not found for room {room_no}")
+                else:
+                    logger.warning(f"Room not found in database for room_id: {room_id}")
+            except Exception as e:
+                logger.error(f"Error loading seat map: {str(e)}")
+                import traceback
+                traceback.print_exc()
         
         frame_number = 0
         extracted_count = 0
@@ -141,14 +290,22 @@ class VideoStreamHandler:
                     frame_filename = f"frame_{job_id}_{frame_number}_{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
                     frame_path = self.frame_dir / frame_filename
                     
-                    # Save frame
-                    cv2.imwrite(str(frame_path), frame)
+                    # Draw seat bounding boxes if seat map is available
+                    if seat_map:
+                        frame_copy = frame.copy()
+                        self._draw_seat_boxes(frame_copy, seat_map)
+                        # Save annotated frame
+                        cv2.imwrite(str(frame_path), frame_copy)
+                    else:
+                        # Save frame without annotations
+                        cv2.imwrite(str(frame_path), frame)
                     
                     frames_info.append({
                         "frame_number": frame_number,
                         "timestamp": timestamp,
                         "frame_path": str(frame_path),
-                        "extracted": True
+                        "extracted": True,
+                        "annotated": seat_map is not None
                     })
                     
                     extracted_count += 1
@@ -240,7 +397,8 @@ class VideoStreamHandler:
         }
     
     def process_recorded_video(self, video_path: str, job_id: str,
-                              progress_callback=None) -> Dict[str, Any]:
+                              progress_callback=None, room_id: Optional[str] = None,
+                              db_session=None) -> Dict[str, Any]:
         """
         Process uploaded exam recording in batch mode.
         Step 1 & 3 of UC-07: Process uploaded recordings in batch
@@ -249,6 +407,8 @@ class VideoStreamHandler:
             video_path: Path to uploaded video file
             job_id: Processing job identifier
             progress_callback: Function to update progress (called during extraction)
+            room_id: Room UUID to get seating plan (optional)
+            db_session: Database session to query room info (optional)
             
         Returns:
             Processing results
@@ -292,7 +452,8 @@ class VideoStreamHandler:
             except Exception as e:
                 logger.warning(f"Progress callback error at start: {e}")
         
-        frames = self.extract_frames(video_path, frame_extraction_rate, job_id, progress_callback)
+        frames = self.extract_frames(video_path, frame_extraction_rate, job_id, progress_callback, 
+                                    room_id=room_id, db_session=db_session)
         
         # Final progress update
         if progress_callback:
