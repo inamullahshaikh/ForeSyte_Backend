@@ -1,16 +1,213 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime, date
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import os
+import json
+import csv
+from pathlib import Path
 
-from database.db import get_db
+from database.db import get_db, SessionLocal
 from database.models import Report, Violation, Investigator, StudentActivity, Exam
 from database.auth import get_current_user
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
+
+# -------------------------
+# Report Generation Utilities
+# -------------------------
+REPORTS_DIR = Path("uploads/reports")
+REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+def generate_json_report(data: Dict[str, Any], file_path: str) -> bool:
+    """Generate a JSON report file."""
+    try:
+        full_path = REPORTS_DIR / Path(file_path).name
+        with open(full_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2, default=str)
+        return True
+    except Exception as e:
+        print(f"Error generating JSON report: {e}")
+        return False
+
+def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
+    """Generate a CSV report file."""
+    try:
+        full_path = REPORTS_DIR / Path(file_path).name
+        
+        # Flatten the data structure for CSV
+        rows = []
+        if 'incidents' in data:
+            for incident in data['incidents']:
+                row = {
+                    'incident_id': incident.get('id', ''),
+                    'type': incident.get('type', ''),
+                    'timestamp': incident.get('timestamp', ''),
+                    'student_name': incident.get('student_name', ''),
+                    'severity': incident.get('severity', ''),
+                    'status': incident.get('status', '')
+                }
+                rows.append(row)
+        elif 'activities' in data:
+            for activity in data['activities']:
+                row = {
+                    'activity_id': activity.get('id', ''),
+                    'type': activity.get('type', ''),
+                    'timestamp': activity.get('timestamp', ''),
+                    'student_id': activity.get('student_id', ''),
+                    'description': activity.get('description', '')
+                }
+                rows.append(row)
+        else:
+            # Generic CSV from dict
+            rows = [data] if isinstance(data, dict) else data
+        
+        if rows:
+            with open(full_path, 'w', newline='', encoding='utf-8') as f:
+                if rows:
+                    writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+                    writer.writeheader()
+                    writer.writerows(rows)
+        return True
+    except Exception as e:
+        print(f"Error generating CSV report: {e}")
+        return False
+
+def generate_pdf_report(data: Dict[str, Any], file_path: str) -> bool:
+    """Generate a simple PDF report file (text-based for now)."""
+    try:
+        full_path = REPORTS_DIR / Path(file_path).name.replace('.pdf', '.txt')
+        
+        # Create a simple text report (can be upgraded to actual PDF later)
+        with open(full_path, 'w', encoding='utf-8') as f:
+            f.write("=" * 80 + "\n")
+            f.write("REPORT\n")
+            f.write("=" * 80 + "\n\n")
+            f.write(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
+            
+            if 'title' in data:
+                f.write(f"Title: {data['title']}\n\n")
+            
+            if 'summary' in data:
+                f.write("SUMMARY\n")
+                f.write("-" * 80 + "\n")
+                for key, value in data['summary'].items():
+                    f.write(f"{key}: {value}\n")
+                f.write("\n")
+            
+            if 'incidents' in data:
+                f.write("INCIDENTS\n")
+                f.write("-" * 80 + "\n")
+                for incident in data['incidents']:
+                    f.write(f"ID: {incident.get('id', 'N/A')}\n")
+                    f.write(f"Type: {incident.get('type', 'N/A')}\n")
+                    f.write(f"Timestamp: {incident.get('timestamp', 'N/A')}\n")
+                    f.write(f"Student: {incident.get('student_name', 'N/A')}\n")
+                    f.write("\n")
+            
+            if 'activities' in data:
+                f.write("ACTIVITIES\n")
+                f.write("-" * 80 + "\n")
+                for activity in data['activities']:
+                    f.write(f"ID: {activity.get('id', 'N/A')}\n")
+                    f.write(f"Type: {activity.get('type', 'N/A')}\n")
+                    f.write(f"Timestamp: {activity.get('timestamp', 'N/A')}\n")
+                    f.write("\n")
+        
+        # For now, we'll create a text file. In production, use a PDF library like reportlab
+        return True
+    except Exception as e:
+        print(f"Error generating PDF report: {e}")
+        return False
+
+async def generate_report_file_async(
+    report_id: UUID,
+    report_type: str,
+    file_path: str,
+    format_type: str,
+    activities: List[StudentActivity] = None,
+    exam: Exam = None,
+    violation: Violation = None
+):
+    """Background task to generate the actual report file."""
+    db = SessionLocal()
+    try:
+        # Prepare report data
+        report_data = {
+            'title': f"{report_type.title()} Report",
+            'generated_at': datetime.utcnow().isoformat(),
+            'report_type': report_type,
+            'summary': {}
+        }
+        
+        if activities:
+            report_data['activities'] = [
+                {
+                    'id': str(act.activity_id),
+                    'type': act.activity_type or 'Unknown',
+                    'timestamp': act.timestamp.isoformat() if act.timestamp else '',
+                    'student_id': str(act.student_id) if act.student_id else '',
+                    'description': f"Activity detected: {act.activity_type}"
+                }
+                for act in activities
+            ]
+            report_data['summary']['total_activities'] = len(activities)
+        
+        if exam:
+            report_data['exam'] = {
+                'id': str(exam.exam_id),
+                'name': exam.course or 'Unknown',
+                'date': exam.exam_date.isoformat() if exam.exam_date else '',
+            }
+            report_data['summary']['exam_name'] = exam.course or 'Unknown'
+        
+        if violation:
+            report_data['violation'] = {
+                'id': str(violation.violation_id),
+                'type': violation.violation_type or 'Unknown',
+                'severity': violation.severity or 0,
+                'status': violation.status or 'pending'
+            }
+        
+        # Generate the file based on format
+        success = False
+        if format_type.lower() == 'json':
+            success = generate_json_report(report_data, file_path)
+        elif format_type.lower() == 'csv':
+            success = generate_csv_report(report_data, file_path)
+        elif format_type.lower() == 'pdf':
+            success = generate_pdf_report(report_data, file_path)
+        else:
+            # Default to JSON
+            success = generate_json_report(report_data, file_path)
+        
+        # Update report status
+        report = db.query(Report).filter(Report.report_id == report_id).first()
+        if report:
+            if success:
+                report.status = "completed"
+                # Update file_path to actual generated file
+                actual_file = REPORTS_DIR / Path(file_path).name
+                if actual_file.exists():
+                    report.file_path = f"/reports/{actual_file.name}"
+            else:
+                report.status = "failed"
+            db.commit()
+        
+    except Exception as e:
+        print(f"Error in background report generation: {e}")
+        # Update status to failed
+        try:
+            report = db.query(Report).filter(Report.report_id == report_id).first()
+            if report:
+                report.status = "failed"
+                db.commit()
+        except:
+            pass
+    finally:
+        db.close()
 
 # -------------------------
 # Helper Functions
@@ -80,6 +277,7 @@ class ReportCreate(BaseModel):
     file_path: str
     violation_id: UUID
     generated_by: UUID
+    status: Optional[str] = "generating"  # Default to generating - reports need async processing
 
 
 class ReportRead(BaseModel):
@@ -87,8 +285,9 @@ class ReportRead(BaseModel):
     report_type: str
     generated_date: date
     file_path: str
-    violation_id: UUID
+    violation_id: Optional[UUID] = None  # Made optional since reports can exist without violations
     generated_by: UUID
+    status: str = "generating"  # generating, completed, failed
 
     model_config = {
         "from_attributes": True
@@ -100,6 +299,7 @@ class ReportUpdate(BaseModel):
     file_path: Optional[str] = None
     violation_id: Optional[UUID] = None
     generated_by: Optional[UUID] = None
+    status: Optional[str] = None  # completed, generating, failed
 
 
 class IncidentReportRequest(BaseModel):
@@ -145,7 +345,11 @@ def create_report(
     if not investigator:
         raise HTTPException(status_code=404, detail="Investigator not found")
 
-    new_report = Report(**report.dict())
+    report_dict = report.dict()
+    # Ensure status is set if not provided
+    if 'status' not in report_dict:
+        report_dict['status'] = 'generating'
+    new_report = Report(**report_dict)
     db.add(new_report)
     db.commit()
     db.refresh(new_report)
@@ -158,6 +362,7 @@ def create_report(
 @router.post("/incidents")
 def generate_incident_report(
     request: IncidentReportRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -215,18 +420,30 @@ def generate_incident_report(
         report_type="incident",
         file_path=file_path,
         violation_id=violation.violation_id,
-        generated_by=investigator_id
+        generated_by=investigator_id,
+        status="generating"  # Will be updated to "completed" by background task
     )
     db.add(new_report)
     db.commit()
     db.refresh(new_report)
+
+    # Start background task to generate the actual report file
+    background_tasks.add_task(
+        generate_report_file_async,
+        report_id=new_report.report_id,
+        report_type="incident",
+        file_path=file_path,
+        format_type=request.format,
+        activities=activities,
+        violation=violation
+    )
 
     # Return report URL or file path
     return {
         "id": str(new_report.report_id),
         "file_path": file_path,
         "format": request.format,
-        "status": "generating"  # In production, this would be async
+        "status": "generating"
     }
 
 
@@ -237,6 +454,7 @@ def generate_incident_report(
 def generate_exam_report(
     exam_id: UUID,
     request: ExamReportRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
@@ -284,11 +502,24 @@ def generate_exam_report(
         report_type="exam",
         file_path=file_path,
         violation_id=violation.violation_id if violation else None,
-        generated_by=investigator_id
+        generated_by=investigator_id,
+        status="generating"  # Will be updated to "completed" by background task
     )
     db.add(new_report)
     db.commit()
     db.refresh(new_report)
+
+    # Start background task to generate the actual report file
+    background_tasks.add_task(
+        generate_report_file_async,
+        report_id=new_report.report_id,
+        report_type="exam",
+        file_path=file_path,
+        format_type=request.format,
+        activities=activities,
+        exam=exam,
+        violation=violation
+    )
 
     return {
         "id": str(new_report.report_id),
@@ -401,3 +632,28 @@ def delete_report(
     db.delete(report)
     db.commit()
     return None
+
+
+# UPDATE Report Status (for async report generation)
+@router.patch("/{report_id}/status", response_model=ReportRead)
+def update_report_status(
+    report_id: UUID,
+    new_status: str = Query(..., regex="^(generating|completed|failed)$"),
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Update report status (used by async report generation tasks).
+    Allows updating status from 'generating' to 'completed' or 'failed'.
+    """
+    if current_user.get("user_type") not in ["admin", "investigator"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    report = db.query(Report).filter(Report.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report.status = new_status
+    db.commit()
+    db.refresh(report)
+    return report

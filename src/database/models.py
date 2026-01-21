@@ -166,8 +166,9 @@ class Report(Base):
     report_type = Column(String)
     generated_date = Column(Date, default=datetime.utcnow)
     file_path = Column(Text)
-    violation_id = Column(UUID(as_uuid=True), ForeignKey("violations.violation_id"))
+    violation_id = Column(UUID(as_uuid=True), ForeignKey("violations.violation_id"), nullable=True)  # Reports can exist without violations
     generated_by = Column(UUID(as_uuid=True), ForeignKey("investigators.investigator_id"))
+    status = Column(String, default="generating")  # generating, completed, failed
 
     violation = relationship("Violation", back_populates="report")
     investigator = relationship("Investigator")
