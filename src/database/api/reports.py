@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query, BackgroundTasks
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from uuid import UUID
 from datetime import datetime, date
@@ -8,6 +9,18 @@ import os
 import json
 import csv
 from pathlib import Path
+
+try:
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+    REPORTLAB_AVAILABLE = True
+except ImportError:
+    REPORTLAB_AVAILABLE = False
+    print("Warning: reportlab not installed. PDF generation will create text files. Install with: pip install reportlab")
 
 from database.db import get_db, SessionLocal
 from database.models import Report, Violation, Investigator, StudentActivity, Exam
@@ -22,22 +35,40 @@ REPORTS_DIR = Path("uploads/reports")
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def generate_json_report(data: Dict[str, Any], file_path: str) -> bool:
-    """Generate a JSON report file."""
-    try:
-        full_path = REPORTS_DIR / Path(file_path).name
-        with open(full_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, default=str)
-        return True
-    except Exception as e:
-        print(f"Error generating JSON report: {e}")
-        return False
-
-def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
-    """Generate a CSV report file."""
+    """Generate a comprehensive JSON report file with all details."""
     try:
         full_path = REPORTS_DIR / Path(file_path).name
         
-        # Flatten the data structure for CSV
+        # Ensure all data is JSON serializable
+        json_data = {
+            'report_metadata': {
+                'title': data.get('title', 'Report'),
+                'generated_at': data.get('generated_at', datetime.utcnow().isoformat()),
+                'report_type': data.get('report_type', 'N/A')
+            },
+            'summary': data.get('summary', {}),
+            'exam_information': data.get('exam', {}),
+            'activities_and_violations': data.get('activities', []),
+            'primary_violation': data.get('primary_violation', None)
+        }
+        
+        with open(full_path, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, indent=2, default=str)
+        
+        print(f"JSON report generated successfully: {full_path}")
+        return True
+    except Exception as e:
+        print(f"Error generating JSON report: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
+    """Generate a comprehensive CSV report file with detailed violation information."""
+    try:
+        full_path = REPORTS_DIR / Path(file_path).name
+        
+        # Prepare rows for CSV with all details
         rows = []
         if 'incidents' in data:
             for incident in data['incidents']:
@@ -52,17 +83,42 @@ def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
                 rows.append(row)
         elif 'activities' in data:
             for activity in data['activities']:
+                violation_info = activity.get('violation', {})
                 row = {
-                    'activity_id': activity.get('id', ''),
-                    'type': activity.get('type', ''),
-                    'timestamp': activity.get('timestamp', ''),
-                    'student_id': activity.get('student_id', ''),
-                    'description': activity.get('description', '')
+                    'Activity_ID': activity.get('activity_id', ''),
+                    'Student_Name': activity.get('student_name', ''),
+                    'Roll_Number': activity.get('student_roll_number', ''),
+                    'Activity_Type': activity.get('activity_type', ''),
+                    'Timestamp': activity.get('timestamp', ''),
+                    'Severity': activity.get('severity', ''),
+                    'Confidence': activity.get('confidence', ''),
+                    'Evidence_URL': activity.get('evidence_url', ''),
+                    'Violation_ID': violation_info.get('violation_id', 'N/A') if violation_info else 'N/A',
+                    'Violation_Type': violation_info.get('type', 'N/A') if violation_info else 'N/A',
+                    'Violation_Severity': violation_info.get('severity', 'N/A') if violation_info else 'N/A',
+                    'Violation_Status': violation_info.get('status', 'N/A') if violation_info else 'N/A',
+                    'Description': activity.get('description', '')
                 }
+                
+                # Add exam info if available
+                if 'exam' in data:
+                    row['Exam_Name'] = data['exam'].get('name', '')
+                    row['Exam_Date'] = data['exam'].get('date', '')
+                
                 rows.append(row)
         else:
             # Generic CSV from dict
             rows = [data] if isinstance(data, dict) else data
+        
+        # If no activities, create a summary row
+        if not rows and 'summary' in data:
+            rows = [{
+                'Report_Type': data.get('report_type', ''),
+                'Generated_At': data.get('generated_at', ''),
+                'Total_Activities': data['summary'].get('total_activities', 0),
+                'Total_Violations': data['summary'].get('total_violations', 0),
+                'Unique_Students': data['summary'].get('unique_students_flagged', 0)
+            }]
         
         if rows:
             with open(full_path, 'w', newline='', encoding='utf-8') as f:
@@ -70,56 +126,233 @@ def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
                     writer = csv.DictWriter(f, fieldnames=rows[0].keys())
                     writer.writeheader()
                     writer.writerows(rows)
+        
+        print(f"CSV report generated successfully: {full_path}")
         return True
     except Exception as e:
         print(f"Error generating CSV report: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def generate_pdf_report(data: Dict[str, Any], file_path: str) -> bool:
-    """Generate a simple PDF report file (text-based for now)."""
+    """Generate a professional PDF report file using reportlab."""
     try:
-        full_path = REPORTS_DIR / Path(file_path).name.replace('.pdf', '.txt')
+        full_path = REPORTS_DIR / Path(file_path).name
+        if not full_path.suffix.lower() == '.pdf':
+            full_path = full_path.with_suffix('.pdf')
         
-        # Create a simple text report (can be upgraded to actual PDF later)
-        with open(full_path, 'w', encoding='utf-8') as f:
-            f.write("=" * 80 + "\n")
-            f.write("REPORT\n")
-            f.write("=" * 80 + "\n\n")
-            f.write(f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}\n\n")
-            
-            if 'title' in data:
-                f.write(f"Title: {data['title']}\n\n")
-            
-            if 'summary' in data:
-                f.write("SUMMARY\n")
-                f.write("-" * 80 + "\n")
-                for key, value in data['summary'].items():
-                    f.write(f"{key}: {value}\n")
-                f.write("\n")
-            
-            if 'incidents' in data:
-                f.write("INCIDENTS\n")
-                f.write("-" * 80 + "\n")
-                for incident in data['incidents']:
-                    f.write(f"ID: {incident.get('id', 'N/A')}\n")
-                    f.write(f"Type: {incident.get('type', 'N/A')}\n")
-                    f.write(f"Timestamp: {incident.get('timestamp', 'N/A')}\n")
-                    f.write(f"Student: {incident.get('student_name', 'N/A')}\n")
-                    f.write("\n")
-            
-            if 'activities' in data:
-                f.write("ACTIVITIES\n")
-                f.write("-" * 80 + "\n")
-                for activity in data['activities']:
-                    f.write(f"ID: {activity.get('id', 'N/A')}\n")
-                    f.write(f"Type: {activity.get('type', 'N/A')}\n")
-                    f.write(f"Timestamp: {activity.get('timestamp', 'N/A')}\n")
-                    f.write("\n")
+        if not REPORTLAB_AVAILABLE:
+            # Fallback to text file if reportlab is not available
+            print("ERROR: reportlab not available!")
+            print("Install with: pip install reportlab==4.2.5")
+            print("Then restart the backend server.")
+            return False
         
-        # For now, we'll create a text file. In production, use a PDF library like reportlab
+        # Create PDF document
+        doc = SimpleDocTemplate(str(full_path), pagesize=A4,
+                               rightMargin=72, leftMargin=72,
+                               topMargin=72, bottomMargin=18)
+        
+        # Container for the 'Flowable' objects
+        story = []
+        
+        # Define styles
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#6e5ae6'),
+            spaceAfter=30,
+            alignment=TA_CENTER,
+            fontName='Helvetica-Bold'
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=16,
+            textColor=colors.HexColor('#4a5568'),
+            spaceAfter=12,
+            spaceBefore=12,
+            fontName='Helvetica-Bold'
+        )
+        
+        # Title
+        title = data.get('title', 'Report')
+        story.append(Paragraph(title, title_style))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Report metadata
+        metadata_data = [
+            ['Generated:', datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')],
+            ['Report Type:', data.get('report_type', 'N/A')],
+        ]
+        
+        if 'exam' in data:
+            exam_info = data['exam']
+            metadata_data.append(['Exam:', exam_info.get('name', 'N/A')])
+            metadata_data.append(['Exam Date:', exam_info.get('date', 'N/A')])
+        
+        metadata_table = Table(metadata_data, colWidths=[2*inch, 4*inch])
+        metadata_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f7fafc')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+        ]))
+        story.append(metadata_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Summary section
+        if 'summary' in data and data['summary']:
+            story.append(Paragraph("Executive Summary", heading_style))
+            summary_data = [['Metric', 'Value']]
+            
+            # Format summary data with better presentation
+            summary = data['summary']
+            if 'total_activities' in summary:
+                summary_data.append(['Total Activities Detected', str(summary['total_activities'])])
+            if 'total_violations' in summary:
+                summary_data.append(['Total Violations', str(summary['total_violations'])])
+            if 'unique_students_flagged' in summary:
+                summary_data.append(['Unique Students Flagged', str(summary['unique_students_flagged'])])
+            if 'exam_name' in summary:
+                summary_data.append(['Exam Name', summary['exam_name']])
+            if 'exam_date' in summary:
+                summary_data.append(['Exam Date', summary['exam_date']])
+            
+            # Add severity breakdown if available
+            if 'severity_breakdown' in summary:
+                severity = summary['severity_breakdown']
+                story.append(Spacer(1, 0.1*inch))
+                summary_data.append(['--- Severity Breakdown ---', ''])
+                for level, count in severity.items():
+                    if count > 0:
+                        summary_data.append([f'{level.title()} Severity', str(count)])
+            
+            summary_table = Table(summary_data, colWidths=[3.5*inch, 2.5*inch])
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6e5ae6')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f7fafc')]),
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ]))
+            story.append(summary_table)
+            story.append(Spacer(1, 0.4*inch))
+        
+        # Detailed Activities and Violations section
+        if 'activities' in data and data['activities']:
+            story.append(Paragraph("Detailed Violation Report", heading_style))
+            story.append(Spacer(1, 0.1*inch))
+            
+            # Create detailed table with violations
+            activities_data = [[
+                'Student',
+                'Roll No',
+                'Activity Type',
+                'Time',
+                'Severity',
+                'Violation Type',
+                'Status'
+            ]]
+            
+            for activity in data['activities'][:100]:  # Show up to 100 activities
+                violation_info = activity.get('violation', {})
+                
+                # Determine row color based on severity
+                student_name = activity.get('student_name', 'Unknown')
+                if len(student_name) > 20:
+                    student_name = student_name[:17] + '...'
+                
+                activities_data.append([
+                    student_name,
+                    activity.get('student_roll_number', 'N/A'),
+                    activity.get('activity_type', 'N/A'),
+                    activity.get('timestamp', 'N/A')[-8:] if activity.get('timestamp') else 'N/A',  # Time only
+                    str(activity.get('severity', 'N/A')),
+                    violation_info.get('type', 'N/A') if violation_info else 'N/A',
+                    violation_info.get('status', 'N/A') if violation_info else 'N/A'
+                ])
+            
+            if len(data['activities']) > 100:
+                activities_data.append([
+                    '...', 
+                    f'{len(data["activities"]) - 100} more',
+                    '', '', '', '', ''
+                ])
+            
+            activities_table = Table(
+                activities_data,
+                colWidths=[1.2*inch, 0.8*inch, 1.3*inch, 0.7*inch, 0.6*inch, 1.1*inch, 0.8*inch]
+            )
+            activities_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6e5ae6')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 7),
+                ('FONTSIZE', (0, 1), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f7fafc')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            story.append(activities_table)
+            story.append(Spacer(1, 0.3*inch))
+        
+        # Violation section
+        if 'violation' in data and data['violation']:
+            story.append(Paragraph("Violation Details", heading_style))
+            violation = data['violation']
+            violation_data = [
+                ['Violation ID:', violation.get('id', 'N/A')],
+                ['Type:', violation.get('type', 'N/A')],
+                ['Severity:', str(violation.get('severity', 'N/A'))],
+                ['Status:', violation.get('status', 'N/A')],
+            ]
+            
+            violation_table = Table(violation_data, colWidths=[2*inch, 4*inch])
+            violation_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f7fafc')),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+            ]))
+            story.append(violation_table)
+            story.append(Spacer(1, 0.3*inch))
+        
+        # Footer
+        story.append(Spacer(1, 0.5*inch))
+        footer_text = f"Generated by ForeSyte System | {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        story.append(Paragraph(footer_text, styles['Normal']))
+        
+        # Build PDF
+        doc.build(story)
+        print(f"PDF report generated successfully: {full_path}")
         return True
+        
     except Exception as e:
         print(f"Error generating PDF report: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 async def generate_report_file_async(
@@ -131,10 +364,12 @@ async def generate_report_file_async(
     exam: Exam = None,
     violation: Violation = None
 ):
-    """Background task to generate the actual report file."""
+    """Background task to generate the actual report file with detailed information."""
     db = SessionLocal()
     try:
-        # Prepare report data
+        from database.models import Student, Violation as ViolationModel
+        
+        # Prepare comprehensive report data
         report_data = {
             'title': f"{report_type.title()} Report",
             'generated_at': datetime.utcnow().isoformat(),
@@ -142,33 +377,95 @@ async def generate_report_file_async(
             'summary': {}
         }
         
+        # Collect detailed violation information
+        violations_list = []
+        unique_students = set()
+        severity_counts = {'low': 0, 'medium': 0, 'high': 0, 'critical': 0}
+        
         if activities:
-            report_data['activities'] = [
-                {
-                    'id': str(act.activity_id),
-                    'type': act.activity_type or 'Unknown',
-                    'timestamp': act.timestamp.isoformat() if act.timestamp else '',
+            # Build detailed activities with student info and violations
+            detailed_activities = []
+            
+            for act in activities:
+                # Get student information
+                student = db.query(Student).filter(Student.student_id == act.student_id).first()
+                student_name = f"{student.name}" if student else "Unknown Student"
+                student_roll = student.roll_number if student else "N/A"
+                unique_students.add(str(act.student_id))
+                
+                # Get associated violation
+                act_violation = db.query(ViolationModel).filter(
+                    ViolationModel.activity_id == act.activity_id
+                ).first()
+                
+                # Determine severity category
+                if act.severity:
+                    if act.severity in ['low', 'medium', 'high', 'critical']:
+                        severity_counts[act.severity] += 1
+                    elif isinstance(act.severity, int):
+                        if act.severity <= 1:
+                            severity_counts['low'] += 1
+                        elif act.severity == 2:
+                            severity_counts['medium'] += 1
+                        elif act.severity == 3:
+                            severity_counts['high'] += 1
+                        else:
+                            severity_counts['critical'] += 1
+                
+                activity_detail = {
+                    'activity_id': str(act.activity_id),
+                    'activity_type': act.activity_type or 'Unknown',
+                    'timestamp': act.timestamp.strftime('%Y-%m-%d %H:%M:%S') if act.timestamp else '',
                     'student_id': str(act.student_id) if act.student_id else '',
-                    'description': f"Activity detected: {act.activity_type}"
+                    'student_name': student_name,
+                    'student_roll_number': student_roll,
+                    'severity': str(act.severity) if act.severity else 'N/A',
+                    'confidence': f"{act.confidence * 100:.1f}%" if act.confidence else 'N/A',
+                    'evidence_url': act.evidence_url or 'N/A',
+                    'description': f"{act.activity_type} detected at {act.timestamp.strftime('%H:%M:%S') if act.timestamp else 'unknown time'}"
                 }
-                for act in activities
-            ]
+                
+                # Add violation information if exists
+                if act_violation:
+                    activity_detail['violation'] = {
+                        'violation_id': str(act_violation.violation_id),
+                        'type': act_violation.violation_type or 'N/A',
+                        'severity': act_violation.severity or 0,
+                        'status': act_violation.status or 'pending',
+                        'timestamp': act_violation.timestamp.strftime('%Y-%m-%d %H:%M:%S') if act_violation.timestamp else ''
+                    }
+                    violations_list.append(activity_detail['violation'])
+                else:
+                    activity_detail['violation'] = None
+                
+                detailed_activities.append(activity_detail)
+            
+            report_data['activities'] = detailed_activities
             report_data['summary']['total_activities'] = len(activities)
+            report_data['summary']['total_violations'] = len(violations_list)
+            report_data['summary']['unique_students_flagged'] = len(unique_students)
+            report_data['summary']['severity_breakdown'] = severity_counts
         
         if exam:
             report_data['exam'] = {
                 'id': str(exam.exam_id),
                 'name': exam.course or 'Unknown',
-                'date': exam.exam_date.isoformat() if exam.exam_date else '',
+                'course_code': exam.course or 'N/A',
+                'date': exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else '',
+                'start_time': exam.start_time.strftime('%H:%M:%S') if exam.start_time else 'N/A',
+                'end_time': exam.end_time.strftime('%H:%M:%S') if exam.end_time else 'N/A',
             }
             report_data['summary']['exam_name'] = exam.course or 'Unknown'
+            report_data['summary']['exam_date'] = exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else 'N/A'
         
         if violation:
-            report_data['violation'] = {
+            report_data['primary_violation'] = {
                 'id': str(violation.violation_id),
                 'type': violation.violation_type or 'Unknown',
                 'severity': violation.severity or 0,
-                'status': violation.status or 'pending'
+                'status': violation.status or 'pending',
+                'timestamp': violation.timestamp.strftime('%Y-%m-%d %H:%M:%S') if violation.timestamp else '',
+                'evidence_url': violation.evidence_url or 'N/A'
             }
         
         # Generate the file based on format
@@ -189,9 +486,31 @@ async def generate_report_file_async(
             if success:
                 report.status = "completed"
                 # Update file_path to actual generated file
-                actual_file = REPORTS_DIR / Path(file_path).name
-                if actual_file.exists():
+                # Check what file was actually created
+                base_name = Path(file_path).stem
+                
+                # Try to find the actual file
+                possible_extensions = []
+                if format_type.lower() == 'pdf':
+                    possible_extensions = ['.pdf', '.txt']  # Fallback for PDF
+                elif format_type.lower() == 'csv':
+                    possible_extensions = ['.csv']
+                elif format_type.lower() == 'json':
+                    possible_extensions = ['.json']
+                
+                actual_file = None
+                for ext in possible_extensions:
+                    test_file = REPORTS_DIR / f"{base_name}{ext}"
+                    if test_file.exists():
+                        actual_file = test_file
+                        break
+                
+                if actual_file:
                     report.file_path = f"/reports/{actual_file.name}"
+                    print(f"Report file saved: {actual_file.name}")
+                else:
+                    print(f"Warning: Generated file not found for {base_name}")
+                    report.status = "failed"
             else:
                 report.status = "failed"
             db.commit()
@@ -657,3 +976,72 @@ def update_report_status(
     db.commit()
     db.refresh(report)
     return report
+
+
+# DOWNLOAD Report File
+@router.get("/{report_id}/download")
+def download_report(
+    report_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Download a report file."""
+    report = db.query(Report).filter(Report.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    # Check if report is completed
+    if report.status != "completed":
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Report is not ready for download. Current status: {report.status}"
+        )
+    
+    # Get the file path - it's stored as /reports/filename.ext
+    if not report.file_path:
+        raise HTTPException(status_code=404, detail="Report file path not found")
+    
+    # Extract filename from path
+    filename = Path(report.file_path).name
+    file_full_path = REPORTS_DIR / filename
+    
+    # If file doesn't exist, try alternative extensions (for backwards compatibility)
+    if not file_full_path.exists():
+        # Try alternative extensions
+        base_name = file_full_path.stem
+        possible_extensions = ['.pdf', '.txt', '.csv', '.json']
+        
+        found = False
+        for ext in possible_extensions:
+            alternative_path = REPORTS_DIR / f"{base_name}{ext}"
+            if alternative_path.exists():
+                file_full_path = alternative_path
+                filename = alternative_path.name
+                found = True
+                break
+        
+        if not found:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Report file not found on server: {filename} (checked all extensions)"
+            )
+    
+    # Determine media type based on file extension
+    extension = file_full_path.suffix.lower()
+    media_type_map = {
+        '.pdf': 'application/pdf',
+        '.csv': 'text/csv',
+        '.json': 'application/json',
+        '.txt': 'text/plain'
+    }
+    media_type = media_type_map.get(extension, 'application/octet-stream')
+    
+    # Return file as download
+    return FileResponse(
+        path=str(file_full_path),
+        media_type=media_type,
+        filename=filename,
+        headers={
+            "Content-Disposition": f"attachment; filename={filename}"
+        }
+    )
