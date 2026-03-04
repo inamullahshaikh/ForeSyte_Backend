@@ -163,6 +163,7 @@ class Violation(Base):
 class Report(Base):
     __tablename__ = "reports"
     report_id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=True)  # User-defined display name (e.g. "Midterm CS101 - Room D302")
     report_type = Column(String)
     generated_date = Column(Date, default=datetime.utcnow)
     file_path = Column(Text)

@@ -619,6 +619,7 @@ class ReportCreate(BaseModel):
 
 class ReportRead(BaseModel):
     report_id: UUID
+    name: Optional[str] = None  # User-defined display name
     report_type: str
     generated_date: date
     file_path: str
@@ -632,11 +633,16 @@ class ReportRead(BaseModel):
 
 
 class ReportUpdate(BaseModel):
+    name: Optional[str] = None  # Rename report
     report_type: Optional[str] = None
     file_path: Optional[str] = None
     violation_id: Optional[UUID] = None
     generated_by: Optional[UUID] = None
     status: Optional[str] = None  # completed, generating, failed
+
+
+class ReportRenameRequest(BaseModel):
+    name: str  # New display name for the report
 
 
 class IncidentReportRequest(BaseModel):
@@ -756,7 +762,9 @@ def generate_incident_report(
     # Get investigator_id for report (handles both admin and investigator users)
     investigator_id = get_investigator_id_for_report(current_user, db)
     
+    initial_name = f"Incident Report - {datetime.utcnow().strftime('%Y-%m-%d %H:%M')}"
     new_report = Report(
+        name=initial_name,
         report_type="incident",
         file_path=file_path,
         violation_id=violation.violation_id,
@@ -845,7 +853,9 @@ def generate_exam_report(
     # Get investigator_id for report (handles both admin and investigator users)
     investigator_id = get_investigator_id_for_report(current_user, db)
 
+    initial_name = f"Exam Report - {exam.course or 'Exam'} - {exam.exam_date.strftime('%Y-%m-%d') if exam.exam_date else 'N/A'}"
     new_report = Report(
+        name=initial_name,
         report_type="exam",
         file_path=file_path,
         violation_id=violation.violation_id if violation else None,
@@ -960,6 +970,36 @@ def update_report(
 
     db.commit()
     db.refresh(report)
+    return report
+
+
+# RENAME Report (Admin + Investigator)
+@router.patch("/{report_id}/name", response_model=ReportRead)
+def rename_report(
+    report_id: UUID,
+    body: ReportRenameRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Rename a report. The new name is stored in the database.
+    Admins and Investigators can rename reports.
+    """
+    if current_user.get("user_type") not in ["admin", "investigator"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    report = db.query(Report).filter(Report.report_id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    new_name = (body.name or "").strip()
+    if not new_name:
+        raise HTTPException(status_code=400, detail="Report name cannot be empty")
+
+    report.name = new_name
+    db.commit()
+    db.refresh(report)
+    logger.info("rename_report: report_id=%s new_name=%s", report_id, new_name)
     return report
 
 
