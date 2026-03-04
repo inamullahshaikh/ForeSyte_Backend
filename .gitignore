@@ -346,3 +346,10 @@ src/uploads/reports/
 
 # Additional environment variable paths
 src/.env
+
+# ============================================
+# YOLO / model weights (large - do not commit)
+# ============================================
+model-train/**/weights/*.pt
+model-train/**/runs/
+**/runs/**/weights/
