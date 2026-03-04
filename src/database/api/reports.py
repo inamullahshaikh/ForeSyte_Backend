@@ -8,7 +8,10 @@ from pydantic import BaseModel
 import os
 import json
 import csv
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 try:
     from reportlab.lib.pagesizes import letter, A4
@@ -18,9 +21,9 @@ try:
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
     from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
     REPORTLAB_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     REPORTLAB_AVAILABLE = False
-    print("Warning: reportlab not installed. PDF generation will create text files. Install with: pip install reportlab")
+    logger.warning("reportlab not installed: %s. PDF generation will create text files. Install with: pip install reportlab", e)
 
 from database.db import get_db, SessionLocal
 from database.models import Report, Violation, Investigator, StudentActivity, Exam
@@ -36,9 +39,9 @@ REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
 def generate_json_report(data: Dict[str, Any], file_path: str) -> bool:
     """Generate a comprehensive JSON report file with all details."""
+    full_path = REPORTS_DIR / Path(file_path).name
+    logger.info("generate_json_report: starting, file_path=%s, full_path=%s", file_path, full_path)
     try:
-        full_path = REPORTS_DIR / Path(file_path).name
-        
         # Ensure all data is JSON serializable
         json_data = {
             'report_metadata': {
@@ -55,19 +58,17 @@ def generate_json_report(data: Dict[str, Any], file_path: str) -> bool:
         with open(full_path, 'w', encoding='utf-8') as f:
             json.dump(json_data, f, indent=2, default=str)
         
-        print(f"JSON report generated successfully: {full_path}")
+        logger.info("generate_json_report: success, path=%s", full_path)
         return True
     except Exception as e:
-        print(f"Error generating JSON report: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("generate_json_report failed: file_path=%s, error=%s", file_path, e)
         return False
 
 def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
     """Generate a comprehensive CSV report file with detailed violation information."""
+    full_path = REPORTS_DIR / Path(file_path).name
+    logger.info("generate_csv_report: starting, file_path=%s, full_path=%s", file_path, full_path)
     try:
-        full_path = REPORTS_DIR / Path(file_path).name
-        
         # Prepare rows for CSV with all details
         rows = []
         if 'incidents' in data:
@@ -127,26 +128,22 @@ def generate_csv_report(data: Dict[str, Any], file_path: str) -> bool:
                     writer.writeheader()
                     writer.writerows(rows)
         
-        print(f"CSV report generated successfully: {full_path}")
+        logger.info("generate_csv_report: success, path=%s, rows=%s", full_path, len(rows))
         return True
     except Exception as e:
-        print(f"Error generating CSV report: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("generate_csv_report failed: file_path=%s, error=%s", file_path, e)
         return False
 
 def generate_pdf_report(data: Dict[str, Any], file_path: str) -> bool:
     """Generate a professional PDF report file using reportlab."""
+    full_path = REPORTS_DIR / Path(file_path).name
+    logger.info("generate_pdf_report: starting, file_path=%s, full_path=%s", file_path, full_path)
     try:
-        full_path = REPORTS_DIR / Path(file_path).name
         if not full_path.suffix.lower() == '.pdf':
             full_path = full_path.with_suffix('.pdf')
         
         if not REPORTLAB_AVAILABLE:
-            # Fallback to text file if reportlab is not available
-            print("ERROR: reportlab not available!")
-            print("Install with: pip install reportlab==4.2.5")
-            print("Then restart the backend server.")
+            logger.error("generate_pdf_report: reportlab not available. Install with: pip install reportlab==4.2.5")
             return False
         
         # Create PDF document
@@ -346,13 +343,11 @@ def generate_pdf_report(data: Dict[str, Any], file_path: str) -> bool:
         
         # Build PDF
         doc.build(story)
-        print(f"PDF report generated successfully: {full_path}")
+        logger.info("generate_pdf_report: success, path=%s", full_path)
         return True
         
     except Exception as e:
-        print(f"Error generating PDF report: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("generate_pdf_report failed: file_path=%s, error=%s", file_path, e)
         return False
 
 async def generate_report_file_async(
@@ -365,6 +360,15 @@ async def generate_report_file_async(
     violation: Violation = None
 ):
     """Background task to generate the actual report file with detailed information."""
+    logger.info(
+        "generate_report_file_async: start report_id=%s report_type=%s file_path=%s format=%s activities_count=%s exam=%s has_violation=%s REPORTS_DIR=%s exists=%s",
+        report_id, report_type, file_path, format_type,
+        len(activities) if activities else 0,
+        exam.exam_id if exam else None,
+        violation is not None,
+        REPORTS_DIR.resolve(),
+        REPORTS_DIR.exists(),
+    )
     db = SessionLocal()
     try:
         from database.models import Student, Violation as ViolationModel
@@ -445,6 +449,9 @@ async def generate_report_file_async(
             report_data['summary']['total_violations'] = len(violations_list)
             report_data['summary']['unique_students_flagged'] = len(unique_students)
             report_data['summary']['severity_breakdown'] = severity_counts
+            logger.info("generate_report_file_async: built %s activities for report_id=%s", len(detailed_activities), report_id)
+        else:
+            logger.info("generate_report_file_async: no activities, report_id=%s", report_id)
         
         if exam:
             report_data['exam'] = {
@@ -468,6 +475,11 @@ async def generate_report_file_async(
                 'evidence_url': violation.evidence_url or 'N/A'
             }
         
+        logger.info(
+            "generate_report_file_async: report_data ready report_id=%s summary_keys=%s activities_len=%s",
+            report_id, list(report_data.get('summary', {}).keys()), len(report_data.get('activities', [])),
+        )
+        
         # Generate the file based on format
         success = False
         if format_type.lower() == 'json':
@@ -478,7 +490,10 @@ async def generate_report_file_async(
             success = generate_pdf_report(report_data, file_path)
         else:
             # Default to JSON
+            logger.info("generate_report_file_async: unknown format %s, defaulting to JSON", format_type)
             success = generate_json_report(report_data, file_path)
+        
+        logger.info("generate_report_file_async: format generation finished report_id=%s success=%s", report_id, success)
         
         # Update report status
         report = db.query(Report).filter(Report.report_id == report_id).first()
@@ -507,26 +522,31 @@ async def generate_report_file_async(
                 
                 if actual_file:
                     report.file_path = f"/reports/{actual_file.name}"
-                    print(f"Report file saved: {actual_file.name}")
+                    logger.info("generate_report_file_async: report completed report_id=%s file=%s", report_id, actual_file.name)
                 else:
-                    print(f"Warning: Generated file not found for {base_name}")
+                    logger.warning("generate_report_file_async: generated file not found report_id=%s base_name=%s checked=%s", report_id, base_name, possible_extensions)
                     report.status = "failed"
             else:
+                logger.warning("generate_report_file_async: generation returned False report_id=%s", report_id)
                 report.status = "failed"
             db.commit()
+        else:
+            logger.error("generate_report_file_async: report record not found report_id=%s", report_id)
         
     except Exception as e:
-        print(f"Error in background report generation: {e}")
+        logger.exception("generate_report_file_async failed: report_id=%s error=%s", report_id, e)
         # Update status to failed
         try:
             report = db.query(Report).filter(Report.report_id == report_id).first()
             if report:
                 report.status = "failed"
                 db.commit()
-        except:
-            pass
+                logger.info("generate_report_file_async: marked report_id=%s as failed", report_id)
+        except Exception as commit_err:
+            logger.exception("generate_report_file_async: failed to update report status to failed: %s", commit_err)
     finally:
         db.close()
+        logger.info("generate_report_file_async: done report_id=%s", report_id)
 
 # -------------------------
 # Helper Functions
@@ -540,8 +560,7 @@ def get_investigator_id_for_report(current_user: dict, db: Session) -> UUID:
     user_type = current_user.get("user_type")
     user_id = current_user.get("id")
     
-    # Debug logging
-    print(f"[REPORT DEBUG] get_investigator_id_for_report called - user_type: {user_type}, user_id: {user_id}")
+    logger.info("get_investigator_id_for_report: user_type=%s user_id=%s", user_type, user_id)
     
     if user_type == "investigator":
         try:
@@ -549,31 +568,30 @@ def get_investigator_id_for_report(current_user: dict, db: Session) -> UUID:
             # Verify the investigator exists
             investigator = db.query(Investigator).filter(Investigator.investigator_id == investigator_id).first()
             if not investigator:
-                print(f"[REPORT DEBUG] WARNING: Investigator {investigator_id} not found! Creating system investigator...")
+                logger.warning("get_investigator_id_for_report: investigator %s not found, using default", investigator_id)
                 # Fall through to create system investigator
             else:
-                print(f"[REPORT DEBUG] Using investigator ID: {investigator_id}")
+                logger.info("get_investigator_id_for_report: using investigator_id=%s", investigator_id)
                 return investigator_id
         except (ValueError, TypeError) as e:
-            print(f"[REPORT DEBUG] Invalid investigator ID format: {e}. Creating system investigator...")
+            logger.warning("get_investigator_id_for_report: invalid investigator ID %s: %s", user_id, e)
             # Fall through to create system investigator
     
     # For admins OR if investigator not found, use/create a system investigator
-    print(f"[REPORT DEBUG] Looking for default investigator...")
     default_investigator = db.query(Investigator).first()
     
     if default_investigator:
-        print(f"[REPORT DEBUG] Found investigator ID: {default_investigator.investigator_id}")
+        logger.info("get_investigator_id_for_report: using default investigator_id=%s", default_investigator.investigator_id)
         return default_investigator.investigator_id
     else:
         # Create a system investigator if none exists
-        print(f"[REPORT DEBUG] No investigators found! Creating system investigator...")
+        logger.info("get_investigator_id_for_report: no investigators found, creating system investigator")
         from database.auth import hash_password
         
         # Check again to avoid race condition (in case another request created one)
         default_investigator = db.query(Investigator).filter(Investigator.email == "system@foresyte.edu").first()
         if default_investigator:
-            print(f"[REPORT DEBUG] System investigator already exists: {default_investigator.investigator_id}")
+            logger.info("get_investigator_id_for_report: system investigator exists id=%s", default_investigator.investigator_id)
             return default_investigator.investigator_id
         
         system_investigator = Investigator(
@@ -585,7 +603,7 @@ def get_investigator_id_for_report(current_user: dict, db: Session) -> UUID:
         db.add(system_investigator)
         db.commit()
         db.refresh(system_investigator)
-        print(f"[REPORT DEBUG] Created system investigator with ID: {system_investigator.investigator_id}")
+        logger.info("get_investigator_id_for_report: created system investigator id=%s", system_investigator.investigator_id)
         return system_investigator.investigator_id
 
 # -------------------------
@@ -688,6 +706,7 @@ def generate_incident_report(
     """
     Generate an incident report for specified incidents.
     """
+    logger.info("generate_incident_report: request incident_ids=%s format=%s", request.incident_ids, request.format)
     if current_user.get("user_type") not in ["admin", "investigator"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -700,10 +719,12 @@ def generate_incident_report(
             ).first()
             if activity:
                 activities.append(activity)
-        except ValueError:
+        except ValueError as e:
+            logger.warning("generate_incident_report: invalid incident_id=%s %s", incident_id, e)
             continue
 
     if not activities:
+        logger.warning("generate_incident_report: no valid incidents found for ids=%s", request.incident_ids)
         raise HTTPException(status_code=404, detail="No valid incidents found")
 
     # Generate report file (simplified - in production, use a proper report generator)
@@ -747,6 +768,10 @@ def generate_incident_report(
     db.refresh(new_report)
 
     # Start background task to generate the actual report file
+    logger.info(
+        "generate_incident_report: adding background task report_id=%s file_path=%s format=%s",
+        new_report.report_id, file_path, request.format,
+    )
     background_tasks.add_task(
         generate_report_file_async,
         report_id=new_report.report_id,
@@ -780,11 +805,13 @@ def generate_exam_report(
     """
     Generate a report for a specific exam.
     """
+    logger.info("generate_exam_report: exam_id=%s format=%s", exam_id, request.format)
     if current_user.get("user_type") not in ["admin", "investigator"]:
         raise HTTPException(status_code=403, detail="Access denied")
 
     exam = db.query(Exam).filter(Exam.exam_id == exam_id).first()
     if not exam:
+        logger.warning("generate_exam_report: exam not found exam_id=%s", exam_id)
         raise HTTPException(status_code=404, detail="Exam not found")
 
     # Generate report file
@@ -796,6 +823,7 @@ def generate_exam_report(
     activities = db.query(StudentActivity).filter(
         StudentActivity.exam_id == exam_id
     ).all()
+    logger.info("generate_exam_report: exam_id=%s activities_count=%s", exam_id, len(activities))
 
     violation = None
     if activities:
@@ -829,6 +857,10 @@ def generate_exam_report(
     db.refresh(new_report)
 
     # Start background task to generate the actual report file
+    logger.info(
+        "generate_exam_report: adding background task report_id=%s file_path=%s format=%s violation_id=%s",
+        new_report.report_id, file_path, request.format, new_report.violation_id,
+    )
     background_tasks.add_task(
         generate_report_file_async,
         report_id=new_report.report_id,
