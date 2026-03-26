@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Response
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, field_validator
 from datetime import datetime, timedelta
 from typing import Optional
 from passlib.context import CryptContext
@@ -108,8 +108,21 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 # Request & Response Schemas
 # -------------------------
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: Optional[str] = None  # password required for all except maybe some students
+
+    @field_validator("email")
+    @classmethod
+    def validate_email(cls, value: str) -> str:
+        # Accept internal local domains (e.g. *.local) used in development,
+        # while still enforcing a basic email shape.
+        email = (value or "").strip().lower()
+        if "@" not in email:
+            raise ValueError("Invalid email format")
+        local_part, domain = email.split("@", 1)
+        if not local_part or not domain or "." not in domain:
+            raise ValueError("Invalid email format")
+        return email
 
 
 class SignupRequest(BaseModel):

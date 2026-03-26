@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from database.db import get_db
 from database.models import StudentActivity, Student, Exam
 from database.auth import get_current_user
+from database.severity_logic import compute_severity
 
 router = APIRouter(prefix="/student-activities", tags=["Student Activities"])
 
@@ -72,7 +73,19 @@ def create_student_activity(
     if not exam:
         raise HTTPException(status_code=404, detail="Exam not found")
 
-    new_activity = StudentActivity(**activity.dict())
+    # Frequency-based severity: if not provided, compute from how often this student
+    # has done this action in this exam
+    severity = activity.severity
+    if not severity or (isinstance(severity, str) and not severity.strip()):
+        severity = compute_severity(
+            activity.student_id,
+            activity.exam_id,
+            activity.activity_type,
+            db,
+        )
+    payload = activity.dict()
+    payload["severity"] = severity
+    new_activity = StudentActivity(**payload)
     db.add(new_activity)
     db.commit()
     db.refresh(new_activity)

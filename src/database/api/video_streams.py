@@ -763,8 +763,8 @@ async def process_video_background(
                 logger.error(f"Failed to update database: {e}")
                 db.rollback()
         
-        # Process video
-        processor = VideoProcessor(db, enable_ai=False)
+        # Process video with AI cheating detection enabled
+        processor = VideoProcessor(db, enable_ai=True)
         seat_mapping = {}  # TODO: Load from seating plan
         
         # Create progress callback to update ProcessingJob during extraction

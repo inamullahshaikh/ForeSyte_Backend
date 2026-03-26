@@ -10,4 +10,5 @@ python-dotenv==1.1.1
 python_jose==3.5.0
 SQLAlchemy==2.0.44
 starlette==0.48.0
+ultralytics==8.3.76
 uvicorn

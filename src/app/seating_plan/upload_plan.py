@@ -145,68 +145,12 @@ def get_room_paths(room_no: str):
     
     return seat_map_path, image_path
 
-def get_column_mapping(room_no: str, max_col: int):
-    """
-    Get column mapping based on room block and max column.
-    
-    Args:
-        room_no: Room number like "A-104", "A104", "B-127", "C-301", "C-311", "D-314"
-        max_col: Maximum column number from seating plan
-    
-    Returns:
-        dict: Mapping from input column to seat_map column
-    """
-    # Normalize room number (handle both "A-104" and "A104" formats)
-    room_no_upper = room_no.upper().replace('-', '').replace(' ', '')
-    room_block = room_no_upper[0] if room_no_upper and room_no_upper[0].isalpha() else None
-    room_num = room_no_upper[1:] if len(room_no_upper) > 1 else None
-    
-    if room_block == 'A':
-        # A block (e.g., A104): max c6 or c5
-        # For A104, always use the full mapping based on detected max column
-        # If max_col is exactly 5, use c5 mapping; otherwise use c6 mapping
-        if max_col == 5:
-            # c1→c1, c2→c3, c3→c5, c4→c7, c5→c9
-            return {1: 1, 2: 3, 3: 5, 4: 7, 5: 9}
-        else:
-            # Default to c6 mapping for A104 (c1→c1, c2→c3, c3→c4, c4→c7, c5→c8, c6→c10)
-            # This handles cases where max_col is 6 or any other value
-            return {1: 1, 2: 3, 3: 4, 4: 7, 5: 8, 6: 10}
-    
-    elif room_block == 'B':
-        # B block (e.g., B127): max c4
-        if max_col == 4:
-            return {1: 1, 2: 3, 3: 5, 4: 7}
-        else:
-            return {i: i for i in range(1, max_col + 1)}
-    
-    elif room_block == 'C':
-        if room_num == '311':
-            # C311: max c4
-            if max_col == 4:
-                return {1: 1, 2: 3, 3: 6, 4: 8}
-            else:
-                return {i: i for i in range(1, max_col + 1)}
-        else:
-            # C301, C307, etc.: max c6 or c5
-            if max_col == 6:
-                return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
-            elif max_col == 5:
-                return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
-            else:
-                return {i: i for i in range(1, max_col + 1)}
-    
-    elif room_block == 'D':
-        # D block (e.g., D314): max c6 or c5
-        if max_col == 6:
-            return {1: 1, 2: 3, 3: 5, 4: 6, 5: 8, 6: 10}
-        elif max_col == 5:
-            return {1: 1, 2: 4, 3: 6, 4: 8, 5: 10}
-        else:
-            return {i: i for i in range(1, max_col + 1)}
-    
-    # Default: 1:1 mapping
-    return {i: i for i in range(1, max_col + 1)}
+# Re-export from shared seat_mapping for backward compatibility
+from app.seating_plan.seat_mapping import (
+    get_column_mapping,
+    get_max_column_from_seats,
+    seat_number_to_seat_map_key,
+)
 
 
 # -------- Main Endpoint --------
@@ -468,15 +412,9 @@ async def upload_seating_plan(
         with open(seat_map_path) as f:
             seat_map = json.load(f)["seats"]
 
-        # Find maximum column from seating plan
-        max_column = 0
-        for student in selected_exam["students"]:
-            seat_no = student["seat_no"].upper()
-            # Extract column number from formats like C1R1, C2R3, etc.
-            col_match = re.search(r'C(\d+)', seat_no)
-            if col_match:
-                col_num = int(col_match.group(1))
-                max_column = max(max_column, col_num)
+        # Find maximum column from seating plan (supports C1R1 and Chair1)
+        seat_nos = [s["seat_no"] for s in selected_exam["students"]]
+        max_column = get_max_column_from_seats(seat_nos) or 10
 
         # Get column mapping based on room and max column
         # Normalize room number for mapping (handle both "A-104" and "A104" formats)
@@ -504,43 +442,18 @@ async def upload_seating_plan(
         if selected_exam["students"]:
             print(f"[DEBUG] Sample seat mappings (first 5 students):")
             for student in selected_exam["students"][:5]:
-                seat_no = student["seat_no"].upper()
-                match = re.search(r'C(\d+)R(\d+)', seat_no)
-                if match:
-                    input_col = int(match.group(1))
-                    row = int(match.group(2))
-                    mapped_col = column_mapping.get(input_col)
-                    if mapped_col:
-                        mapped_seat = f"seat_c{mapped_col}r{row}"
-                        print(f"  {seat_no} -> {mapped_seat} (col {input_col} -> {mapped_col})")
-                    else:
-                        print(f"  {seat_no} -> NO MAPPING (col {input_col} not in mapping)")
-
-        # Create a mapping from input seat numbers to seat_map IDs
-        def map_seat_to_seat_map(seat_no):
-            """Map input seat number (e.g., C1R1) to seat_map ID (e.g., seat_c1r1)"""
-            seat_no = seat_no.upper()
-            # Extract column and row
-            match = re.search(r'C(\d+)R(\d+)', seat_no)
-            if not match:
-                return None
-            
-            input_col = int(match.group(1))
-            row = int(match.group(2))
-            
-            # Map to seat_map column
-            mapped_col = column_mapping.get(input_col)
-            if not mapped_col:
-                return None
-            
-            return f"seat_c{mapped_col}r{row}"
+                seat_no = student["seat_no"]
+                mapped_seat = seat_number_to_seat_map_key(seat_no, room_number, max_column)
+                print(f"  {seat_no} -> {mapped_seat or 'NO MAPPING'}")
 
         # Build a set of filled seat_map IDs (seats with students)
         filled_seats = set()
         student_seat_map = {}  # Map seat_map_id to student data
         
         for student in selected_exam["students"]:
-            seat_map_id = map_seat_to_seat_map(student["seat_no"])
+            seat_map_id = seat_number_to_seat_map_key(
+                student["seat_no"], room_number, max_column
+            )
             if seat_map_id:
                 filled_seats.add(seat_map_id)
                 student_seat_map[seat_map_id] = student

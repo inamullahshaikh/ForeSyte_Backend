@@ -114,10 +114,10 @@ def get_students(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Protected — Only admins can view all students.
+    Admins and investigators can list all students (e.g. for report dropdowns).
     """
-    if current_user.get("user_type") != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view all students")
+    if current_user.get("user_type") not in ("admin", "investigator"):
+        raise HTTPException(status_code=403, detail="Only admins and investigators can list students")
 
     return db.query(Student).all()
 

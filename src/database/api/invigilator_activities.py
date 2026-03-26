@@ -33,6 +33,20 @@ class InvigilatorActivityRead(BaseModel):
         "from_attributes": True
     }
 
+class InvigilatorActivityDetailedRead(BaseModel):
+    activity_id: UUID
+    invigilator_id: UUID
+    room_id: UUID
+    timestamp: datetime
+    activity_type: str
+    notes: Optional[str]
+    room_number: Optional[str] = None
+    block: Optional[str] = None
+
+    model_config = {
+        "from_attributes": True
+    }
+
 
 class InvigilatorActivityUpdate(BaseModel):
     activity_type: Optional[str] = None
@@ -86,6 +100,46 @@ def get_all_invigilator_activities(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return db.query(InvigilatorActivity).all()
+
+
+@router.get("/me", response_model=List[InvigilatorActivityDetailedRead])
+def get_my_invigilator_activities(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Invigilators can view only their own activities.
+    Admins and investigators can also call this endpoint but it will
+    return an empty list unless the caller is an invigilator.
+    """
+    if current_user.get("user_type") == "invigilator":
+        invigilator_id = UUID(current_user.get("id"))
+        activities = (
+            db.query(InvigilatorActivity, Room)
+            .join(Room, InvigilatorActivity.room_id == Room.room_id, isouter=True)
+            .filter(InvigilatorActivity.invigilator_id == invigilator_id)
+            .order_by(InvigilatorActivity.timestamp.desc())
+            .all()
+        )
+
+        return [
+            InvigilatorActivityDetailedRead(
+                activity_id=activity.activity_id,
+                invigilator_id=activity.invigilator_id,
+                room_id=activity.room_id,
+                timestamp=activity.timestamp,
+                activity_type=activity.activity_type,
+                notes=activity.notes,
+                room_number=room.room_number if room else None,
+                block=room.block if room else None,
+            )
+            for activity, room in activities
+        ]
+
+    if current_user.get("user_type") not in ["admin", "investigator"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return []
 
 
 # READ by ID (Admin + Investigator)
@@ -154,3 +208,5 @@ def delete_invigilator_activity(
     db.delete(activity)
     db.commit()
     return None
+
+

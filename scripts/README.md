@@ -4,6 +4,27 @@ This directory contains utility scripts for database management operations.
 
 ## Available Scripts
 
+### `create_invigilators.py`
+
+Creates or updates the required invigilator accounts for the invigilator portal.
+
+**Creates these accounts:**
+- Ms. Saira Qamar (`saira.qamar@invigilator.foresyte.local`)
+- Mr. Inam Ullah Shaikh (`inam.shaikh@invigilator.foresyte.local`)
+- Ms. Aden Sial (`aden.sial@invigilator.foresyte.local`)
+- Ms. Emaan Fatima (`emaan.fatima@invigilator.foresyte.local`)
+
+**Usage:**
+```bash
+python scripts/create_invigilators.py
+python scripts/create_invigilators.py --password "StrongPassword123!"
+```
+
+**Default password:**
+- `Invigilator@123` (or `DEFAULT_INVIGILATOR_PASSWORD` from environment)
+
+---
+
 ### `delete_all_students.py`
 
 Deletes all students from the database along with their related records.

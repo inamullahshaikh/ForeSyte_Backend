@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from database.db import get_db
 from database.models import StudentActivity, Student, Exam, Violation
 from database.auth import get_current_user
+from database.severity_logic import severity_to_int
 
 router = APIRouter(prefix="/incidents", tags=["Incidents"])
 
@@ -182,7 +183,7 @@ def update_incident_status(
         violation = Violation(
             activity_id=activity.activity_id,
             violation_type=activity.activity_type or "Unknown",
-            severity=1,  # Default severity
+            severity=severity_to_int(activity.severity),
             status=update.status
         )
         db.add(violation)

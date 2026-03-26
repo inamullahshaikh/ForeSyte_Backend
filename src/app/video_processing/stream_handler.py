@@ -97,6 +97,28 @@ class VideoStreamHandler:
                 "source": source
             }
     
+    def get_seat_map_for_room(self, room_id: Optional[str], frame_width: int, frame_height: int, db_session=None) -> Optional[Dict[str, list]]:
+        """
+        Load and scale seat map for a room. Used for bbox-to-student mapping.
+        Returns dict of seat_map_key -> polygon points, or None.
+        """
+        if not room_id or not db_session:
+            return None
+        try:
+            from database.models import Room
+            from uuid import UUID
+            
+            room = db_session.query(Room).filter(Room.room_id == UUID(room_id)).first()
+            if not room:
+                return None
+            room_no = f"{room.block}-{room.room_number}" if room.block else room.room_number
+            seat_map_path = self._get_room_paths(room_no)
+            if seat_map_path:
+                return self._load_seat_map(seat_map_path, frame_width, frame_height)
+        except Exception as e:
+            logger.error(f"Error loading seat map for room: {e}")
+        return None
+
     def _get_room_paths(self, room_no: str):
         """
         Get room-specific seat_map.json path based on room number.
@@ -435,12 +457,8 @@ class VideoStreamHandler:
         logger.info(f"Processing recorded video: {video_path}")
         logger.info(f"Total frames: {total_frames}, FPS: {fps}")
         
-        # Extract frames (every 30 frames = ~1 per second for 30fps video)
-        # But reduce rate for shorter videos to get more frames
+        # Extract 1 frame per second: take every Nth frame where N = fps
         frame_extraction_rate = max(1, int(fps))
-        # For videos with fewer frames, extract more frequently
-        if total_frames < 1000:
-            frame_extraction_rate = max(1, int(fps // 2))  # Extract every 15 frames for shorter videos
         
         # Calculate expected extracted frames
         expected_extracted = (total_frames // frame_extraction_rate) + (1 if total_frames % frame_extraction_rate > 0 else 0)
@@ -462,13 +480,21 @@ class VideoStreamHandler:
             except Exception as e:
                 logger.warning(f"Progress callback error at end: {e}")
         
+        # Load seat map for bbox-to-student mapping (same dimensions as video frames)
+        frame_width = validation.get('width', 1920)
+        frame_height = validation.get('height', 1080)
+        seat_map = self.get_seat_map_for_room(room_id, frame_width, frame_height, db_session)
+        
         return {
             "success": True,
             "total_frames": total_frames,
             "extracted_frames": len(frames),
             "fps": fps,
             "duration": validation['duration'],
-            "frames_info": frames
+            "frames_info": frames,
+            "seat_map": seat_map,
+            "frame_width": frame_width,
+            "frame_height": frame_height,
         }
     
     def save_uploaded_video(self, file_content: bytes, filename: str, 
